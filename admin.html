@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0F766E">
+<title>AarogyaSetu · Hyderabad Ops Command Center</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="assets/theme.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+Telugu:wght@500;700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+</head>
+<body class="bg-canvas text-slate-800 antialiased overflow-x-hidden">
+<div class="lg:flex min-h-[100dvh]">
+  <!-- desktop sidebar -->
+  <aside class="hidden lg:flex w-64 shrink-0 flex-col bg-white border-r border-slate-200 sticky top-0 h-[100dvh] p-5">
+    <div class="flex items-center gap-3"><div class="w-11 h-11 rounded-2xl bg-brand-700 text-white grid place-items-center"><i data-lucide="heart-pulse"></i></div>
+      <div><p class="font-extrabold leading-tight">Aarogya<span class="text-brand-700">Setu</span></p><p class="text-xs text-slate-500">Ops Command Center</p></div></div>
+    <nav id="sideNav" class="mt-8 space-y-1"></nav>
+    <div class="mt-auto space-y-2 text-sm">
+      <a href="app.html" class="flex items-center gap-2 rounded-xl px-3 py-2.5 font-semibold text-slate-600 hover:bg-slate-50"><i data-lucide="smartphone"></i>Open app</a>
+      <a href="register.html" class="flex items-center gap-2 rounded-xl px-3 py-2.5 font-semibold text-slate-600 hover:bg-slate-50"><i data-lucide="user-plus"></i>Registration</a>
+      <button onclick="resetDemo()" class="w-full flex items-center gap-2 rounded-xl px-3 py-2.5 font-semibold text-slate-600 hover:bg-slate-50"><i data-lucide="rotate-ccw"></i>Reset demo data</button>
+      <div class="flex items-center gap-3 rounded-2xl bg-slate-50 p-3 mt-3"><div class="w-10 h-10 rounded-xl bg-slate-800 text-white grid place-items-center font-bold">AK</div><div><p class="font-bold">Anjali K.</p><p class="text-xs text-slate-500">Shift lead · Hitech ops</p></div></div>
+    </div>
+  </aside>
+
+  <div class="flex-1 min-w-0 pb-24 lg:pb-8">
+    <header class="sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-slate-200">
+      <div class="px-4 lg:px-8 h-16 flex items-center gap-3">
+        <div class="lg:hidden w-10 h-10 rounded-2xl bg-brand-700 text-white grid place-items-center shrink-0"><i data-lucide="heart-pulse"></i></div>
+        <div class="flex-1 min-w-0"><h1 class="font-extrabold text-lg leading-tight truncate" id="secTitle">Overview</h1><p class="text-xs text-slate-500 truncate">Hyderabad operations · <span id="opsClock">--</span> IST</p></div>
+        <span class="hidden sm:inline-flex items-center gap-1.5 rounded-full bg-brand-50 text-brand-800 border border-brand-100 px-3 py-1.5 text-xs font-bold"><span class="w-2 h-2 rounded-full bg-brand-600 pulse-teal"></span>Live</span>
+        <button onclick="openMore()" class="lg:hidden w-11 h-11 rounded-full grid place-items-center hover:bg-slate-100" aria-label="More"><i data-lucide="ellipsis-vertical"></i></button>
+      </div>
+    </header>
+    <main id="main" class="px-4 lg:px-8 py-5"></main>
+  </div>
+
+  <!-- mobile bottom nav -->
+  <nav id="bottomNav" class="lg:hidden fixed bottom-0 inset-x-0 z-30 bg-white border-t border-slate-200 grid grid-cols-4 safe-b"></nav>
+</div>
+
+<script src="assets/common.js"></script>
+<script>
+/* =========================================================
+   Hyderabad Ops Command Center — mobile-first admin
+   ========================================================= */
+const SECTIONS = [['overview','Overview','layout-dashboard'],['verify','Verification','shield-check'],['trips','Live trips','route'],['hospitals','Hospitals','hospital']];
+let SEC = SECTIONS.some(s=>s[0]===location.hash.slice(1)) ? location.hash.slice(1) : 'overview';
+let QFILTER = 'all', LIVE_DELTA = 0, TT = 168;
+const LOCAL_FEED = [];
+
+const SEED_DEMAND = {'hitec|aig-gb':42,'gachibowli|aig-gb':38,'jubilee|apollo-jh':35,'secunderabad|yashoda-sec':31,'somajiguda|yashoda-som':29,'banjara|care-bh':27,'secunderabad|kims-sec':26,'kondapur|kims-kpr':24,'kondapur|aig-gb':21,'banjara|apollo-jh':19,'hitec|kims-kpr':18,'jubilee|care-bh':12};
+const DEMAND = {};
+AREAS.forEach(a=>HOSPITALS.forEach(h=>{ const k=a.id+'|'+h.id; DEMAND[k] = SEED_DEMAND[k] ?? Math.max(1, Math.round(16/(1+km(a,h)/3.5))); }));
+const ZONES = [{a:'HITEC City',req:14,drv:6,att:9},{a:'Gachibowli',req:11,drv:7,att:8},{a:'Jubilee Hills',req:9,drv:8,att:7},{a:'Secunderabad',req:10,drv:9,att:11},{a:'Somajiguda',req:6,drv:5,att:6},{a:'Banjara Hills',req:7,drv:6,att:5},{a:'Kondapur',req:8,drv:4,att:5}];
+const OTHER_TRIPS = [
+  {id:'ASH-HYD-24803', p:'S. Devi, 74',    r:'Kondapur → KIMS Kondapur',     d:'Mohammed Imran',  a:'Sravani K.',   s:'Lab tests in progress', tone:'amber', eta:'1h 10m', pct:55},
+  {id:'ASH-HYD-24809', p:'A. Rasheed, 61', r:'HITEC City → AIG Gachibowli',  d:'Anil Kumar Goud', a:'Ayesha F.',    s:'Endoscopy recovery',    tone:'amber', eta:'2h 05m', pct:48},
+  {id:'ASH-HYD-24811', p:'L. Narayana, 80',r:'Secunderabad → Yashoda Sec.',  d:'Venkatesh Yadav', a:'Kiran N.',     s:'En route to hospital',  tone:'teal',  eta:'18 min', pct:22},
+  {id:'ASH-HYD-24812', p:'P. Reddy, 72',   r:'Somajiguda → Yashoda Som.',    d:'Syed Afzal',      a:'Deepika R.',   s:'Consultation',          tone:'amber', eta:'1h 40m', pct:60},
+  {id:'ASH-HYD-24815', p:'R. Mehta, 45',   r:'Jubilee Hills → Apollo JH',    d:'—',               a:'Mohd. Faizan', s:'Physio escort',         tone:'amber', eta:'55 min', pct:70},
+];
+const HSTAT = {'apollo-jh':['Medium',6],'yashoda-som':['High',5],'yashoda-sec':['Low',4],'aig-gb':['High',9],'kims-sec':['Medium',4],'kims-kpr':['Low',3],'care-bh':['Low',4]};
+const pending = () => S.queue.filter(q=>q.status==='pending');
+
+function go(sec){ SEC = sec; history.replaceState(null,'','#'+sec); render(); window.scrollTo({top:0}); }
+function openMore(){
+  openSheet(`<h3 class="text-xl font-extrabold mb-4 pr-10">More</h3><div class="grid gap-2">
+    <a href="app.html" class="btn-ghost !justify-start"><i data-lucide="smartphone"></i>Open patient / partner app</a>
+    <a href="register.html" class="btn-ghost !justify-start"><i data-lucide="user-plus"></i>Partner registration</a>
+    <button class="btn-ghost !justify-start" onclick="closeSheet();resetDemo()"><i data-lucide="rotate-ccw"></i>Reset demo data</button></div>`);
+}
+function navHtml(mobile){
+  const n = pending().length;
+  return SECTIONS.map(([k,l,ic])=> mobile
+    ? `<button class="navbtn ${SEC===k?'active':''}" onclick="go('${k}')">${SEC===k?'<span class="absolute top-0 inset-x-6 h-1 rounded-b-full bg-brand-700"></span>':''}<i data-lucide="${ic}"></i>${l.split(' ')[0]}${k==='verify'&&n?`<span class="absolute top-1.5 right-[calc(50%-22px)] min-w-[20px] h-5 px-1 rounded-full bg-warm-600 text-white text-[11px] grid place-items-center">${n}</span>`:''}</button>`
+    : `<button onclick="go('${k}')" class="w-full flex items-center gap-3 rounded-xl px-3 py-3 font-bold ${SEC===k?'bg-brand-700 text-white':'text-slate-600 hover:bg-slate-50'}"><i data-lucide="${ic}"></i><span class="flex-1 text-left">${l}</span>${k==='verify'&&n?`<span class="rounded-full ${SEC===k?'bg-white text-brand-800':'bg-warm-600 text-white'} text-xs px-2 py-0.5">${n}</span>`:''}</button>`).join('');
+}
+function render(){
+  $('#sideNav').innerHTML = navHtml(false);
+  $('#bottomNav').innerHTML = navHtml(true);
+  $('#secTitle').textContent = SECTIONS.find(s=>s[0]===SEC)[1];
+  $('#main').innerHTML = `<div class="fade-in">${({overview:secOverview, verify:secVerify, trips:secTrips, hospitals:secHospitals})[SEC]()}</div>`;
+  icons();
+}
+onState(render);
+
+/* ---------- Overview ---------- */
+function kpis(){
+  const cards = [
+    ['Active trips', S.stats.active + LIVE_DELTA, 'route', '+6 vs last Monday', 'teal'],
+    ['Verified trainees', S.stats.trainees, 'graduation-cap', `${pending().filter(q=>q.type==='trainee').length} awaiting KYC`, 'amber'],
+    ['Hospitals online', '7/7', 'hospital', 'All gates reporting', 'teal'],
+    ['Avg. turnaround', `${Math.floor(TT/60)}h ${TT%60}m`, 'timer', 'Door-to-door today', 'teal'],
+  ];
+  return `<div class="grid grid-cols-2 xl:grid-cols-4 gap-2 lg:gap-3">${cards.map(([l,v,ic,sub,tone])=>`
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm px-3 py-2.5 flex items-center gap-2.5 min-w-0">
+      <span class="w-9 h-9 rounded-xl ${tone==='amber'?'bg-warm-50 text-warm-700':'bg-brand-50 text-brand-700'} grid place-items-center shrink-0"><i data-lucide="${ic}" class="ico-sm"></i></span>
+      <div class="min-w-0">
+        <p class="text-[11px] font-bold text-slate-500 truncate">${l}</p>
+        <p class="text-xl font-extrabold text-slate-900 leading-tight tabular-nums">${v}</p>
+        <p class="text-[10px] font-semibold truncate ${tone==='amber'?'text-warm-700':'text-brand-700'}">${sub}</p>
+      </div></div>`).join('')}</div>`;
+}
+function secOverview(){
+  const max = Math.max(...Object.values(DEMAND));
+  const ranked = Object.entries(DEMAND).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  const [ta, th] = ranked[0][0].split('|');
+  return `${kpis()}
+  <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6 mt-3 lg:mt-5">
+    <div class="lg:col-span-8 space-y-4 lg:space-y-6 min-w-0">
+      <div class="rounded-3xl bg-warm-50 border border-warm-200 p-4 flex flex-col sm:flex-row sm:items-center gap-3">
+        <div class="flex items-start gap-3 flex-1"><i data-lucide="trending-up" class="text-warm-700 mt-0.5"></i>
+          <div class="text-sm"><p class="font-extrabold text-warm-700">Hotspot: ${area(ta).name} → ${hName(hosp(th))}</p><p class="text-slate-700">2.1× weekday average. Pre-position 4 wheelchair vans near Mindspace Junction, 8–11 AM.</p></div></div>
+        <button class="btn-amber !min-h-[44px] !py-2" onclick="toast('4 vehicles re-routed to Mindspace Junction','warn'); logEvent('Ops re-positioned <b>4 WAVs</b> to Mindspace Junction','truck','amber')"><i data-lucide="send"></i>Deploy</button>
+      </div>
+      <div class="panel">
+        <h2 class="h2">Top demand corridors</h2><p class="text-sm text-slate-500 mb-3">Pickup zone → hospital, bookings today</p>
+        <ul class="space-y-2.5">${ranked.map(([k,v])=>{ const [a,h]=k.split('|'); return `<li><div class="flex justify-between text-sm"><span class="font-bold truncate pr-2">${area(a).name} → ${hName(hosp(h))}</span><span class="font-extrabold tabular-nums">${v}</span></div><div class="h-2 rounded-full bg-slate-100 mt-1"><div class="h-full rounded-full bg-brand-700" style="width:${v/max*100}%"></div></div></li>`; }).join('')}</ul>
+      </div>
+      <div class="panel">
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-3"><div><h2 class="h2">Area × hospital heatmap</h2><p class="text-sm text-slate-500 lg:hidden">Swipe sideways to see all hospitals</p><p class="text-sm text-slate-500 hidden lg:block">Bookings today by pickup zone</p></div>
+          <div class="flex items-center gap-1.5 text-xs font-semibold text-slate-500">Low<span class="flex">${[0.1,0.3,0.5,0.7,0.9].map(o=>`<span class="w-5 h-3" style="background:rgba(15,118,110,${o})"></span>`).join('')}</span>High</div></div>
+        <div class="overflow-x-auto scroll-thin -mx-1"><table class="w-full text-sm border-separate min-w-[600px] lg:min-w-0" style="border-spacing:4px">
+          <thead><tr><th class="text-left text-xs text-slate-500 font-bold p-1 sticky left-0 bg-white">Zone</th>${HOSPITALS.map(h=>`<th class="text-[11px] text-slate-600 font-bold p-1 leading-tight">${h.name.split(' ')[0]}<br><span class="font-medium text-slate-400">${h.branch}</span></th>`).join('')}</tr></thead>
+          <tbody>${AREAS.map(a=>`<tr><td class="font-bold text-slate-700 whitespace-nowrap pr-2 sticky left-0 bg-white">${a.name}</td>${HOSPITALS.map(h=>{ const v=DEMAND[a.id+'|'+h.id], o=0.07+0.88*v/max; return `<td class="text-center rounded-lg font-bold py-2.5 ${o>0.5?'text-white':'text-slate-700'}" style="background:rgba(15,118,110,${o.toFixed(2)})">${v}</td>`; }).join('')}</tr>`).join('')}</tbody>
+        </table></div>
+      </div>
+    </div>
+    <div class="lg:col-span-4 space-y-4 lg:space-y-6 min-w-0">
+      <div class="panel">
+        <h2 class="h2">Zone supply vs demand</h2><p class="text-sm text-slate-500 mb-2">Requests · drivers · attendants</p>
+        <ul class="divide-y divide-slate-100">${ZONES.map(z=>{ const r=z.req/Math.min(z.drv,z.att); const st=r>1.6?['Surge','badge-red']:r>1.15?['Tight','badge-warn']:['OK','badge-ok']; return `<li class="py-2.5 flex items-center gap-3"><span class="flex-1 font-bold text-sm">${z.a}</span><span class="text-xs text-slate-500 tabular-nums">${z.req} · ${z.drv} · ${z.att}</span><span class="${st[1]} w-16 justify-center">${st[0]}</span></li>`; }).join('')}</ul>
+      </div>
+      <div class="panel">
+        <div class="flex items-center justify-between mb-3"><h2 class="h2">Live activity</h2><span class="inline-flex items-center gap-1.5 text-xs font-bold text-brand-700"><span class="w-2 h-2 rounded-full bg-brand-600 pulse-teal"></span>Streaming</span></div>
+        ${feedHtml(12)}
+      </div>
+    </div>
+  </div>`;
+}
+function feedHtml(n){
+  const tone = {teal:'bg-brand-50 text-brand-700', amber:'bg-warm-50 text-warm-700', red:'bg-rose-50 text-rose-700'};
+  const items = [...S.feed, ...LOCAL_FEED].sort((a,b)=>b.ts-a.ts).slice(0,n);
+  return `<ul class="space-y-3">${items.map(f=>`<li class="flex gap-3"><span class="w-9 h-9 rounded-xl grid place-items-center shrink-0 ${tone[f.tone]||tone.teal}"><i data-lucide="${f.icon}" class="ico-sm"></i></span><div class="text-sm min-w-0"><p class="text-slate-700 leading-snug">${f.text}</p><p class="text-xs text-slate-400 mt-0.5">${ago(f.ts)}</p></div></li>`).join('')}</ul>`;
+}
+
+/* ---------- Verification ---------- */
+function secVerify(){
+  const list = pending().filter(q=>QFILTER==='all'||q.type===QFILTER);
+  const done = S.queue.filter(q=>q.status!=='pending').slice(0,4);
+  return `<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+      <p class="text-xs text-slate-500"><b class="text-slate-800">${pending().length} pending</b> · SLA 24 hrs · Verified trainees ${S.stats.trainees} · drivers ${S.stats.drivers}</p>
+      <div class="grid grid-cols-3 rounded-xl bg-slate-200/60 p-1 text-xs font-bold">${[['all','All'],['trainee','Trainees'],['driver','Drivers']].map(([k,l])=>`<button class="px-3 py-1.5 rounded-lg ${QFILTER===k?'bg-white shadow text-brand-800':'text-slate-500'}" onclick="QFILTER='${k}';render()">${l}</button>`).join('')}</div>
+    </div>
+    ${list.length?`<div class="bg-white rounded-2xl border border-slate-200 shadow-sm divide-y divide-slate-100 overflow-hidden">${list.map(q=>`
+      <div class="flex items-center gap-3 px-3 py-2.5 ${q.fresh?'bg-brand-50/60':''}">
+        <span class="w-9 h-9 rounded-lg grid place-items-center shrink-0 ${q.type==='driver'?'bg-slate-800':'bg-brand-700'} text-white"><i data-lucide="${q.type==='driver'?'car':'stethoscope'}" class="ico-sm"></i></span>
+        <button class="flex-1 min-w-0 text-left" onclick="viewDocs('${q.id}')" aria-label="Review ${q.name}">
+          <p class="text-[15px] font-bold leading-tight truncate">${q.name}${q.fresh?' <span class="ml-1 align-middle text-[10px] font-bold text-brand-700 bg-brand-100 rounded px-1">NEW</span>':''}</p>
+          <p class="text-xs text-slate-500 truncate">${q.sub}</p>
+          ${q.flags.length?`<p class="text-[11px] text-warm-700 font-bold truncate mt-0.5">⚠ ${q.flags[0]}</p>`:`<p class="text-[11px] text-slate-400 font-semibold truncate mt-0.5">${q.id} · ${q.docs.length} docs · ${ago(q.ts)}</p>`}
+        </button>
+        <button class="w-9 h-9 rounded-full border border-rose-200 text-rose-600 grid place-items-center shrink-0 hover:bg-rose-50" onclick="rejectApp('${q.id}')" aria-label="Reject ${q.name}"><i data-lucide="x" class="ico-sm"></i></button>
+        <button class="w-9 h-9 rounded-full bg-brand-700 text-white grid place-items-center shrink-0 hover:bg-brand-800" onclick="approveApp('${q.id}')" aria-label="Approve ${q.name}"><i data-lucide="check" class="ico-sm"></i></button>
+      </div>`).join('')}</div>
+      <p class="text-xs text-slate-400 mt-2 text-center">Tap a row to review documents</p>`
+    : `<div class="panel text-center py-14"><i data-lucide="inbox" class="mx-auto !w-12 !h-12 text-slate-300"></i><p class="mt-3 font-extrabold">Queue clear</p><p class="text-sm text-slate-500">New sign-ups from <a href="register.html" class="text-brand-700 font-bold">register.html</a> appear here instantly.</p></div>`}
+    ${done.length?`<h2 class="h2 mt-8 mb-3">Recently decided</h2><div class="panel !py-1 divide-y divide-slate-100">${done.map(q=>`<div class="flex items-center gap-3 py-3"><span class="flex-1 min-w-0"><b class="block truncate">${q.name}</b><span class="text-xs text-slate-500">${q.id}</span></span><span class="${q.status==='approved'?'badge-ok':'badge-red'}">${q.status==='approved'?'Approved':'Rejected'}</span></div>`).join('')}</div>`:''}`;
+}
+function viewDocs(id){
+  const q = S.queue.find(x=>x.id===id); if (!q) return;
+  const checks = q.type==='trainee'
+    ? [['Council / student ID found in registry (mock)', true], ['Face match: ID vs selfie — 96%', true], ['College bonafide verified by email', true], ['BLS / first-aid certificate valid', !q.flags.some(f=>f.includes('BLS'))]]
+    : [['RC matches Vahan record (mock)', true], ['Commercial licence endorsement', true], ['Insurance valid', true], ['Police clearance certificate', !q.flags.some(f=>f.includes('Police'))]];
+  openSheet(`
+    <p class="text-xs font-bold text-brand-700 uppercase tracking-wider">${q.type==='driver'?'Driver & vehicle':'Medical trainee'} · ${q.id}</p>
+    <h3 class="text-2xl font-extrabold mt-1 pr-10">${q.name}</h3>
+    <p class="text-slate-600">${q.sub}</p><p class="text-sm text-slate-500 mt-1">${q.idno} · ${q.langs}</p>
+    <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-4">${q.docs.map(d=>`<div class="rounded-2xl border border-slate-200 overflow-hidden"><div class="h-16 bg-gradient-to-br from-slate-100 to-slate-200 grid place-items-center text-slate-400"><i data-lucide="file-image"></i></div><p class="text-xs font-bold p-2 leading-tight">${d}</p></div>`).join('')}</div>
+    <h4 class="font-extrabold mt-5 mb-2">Automated checks</h4>
+    <ul class="space-y-2">${checks.map(([t,ok])=>`<li class="flex items-center gap-2 text-sm rounded-xl px-3 py-2.5 ${ok?'bg-brand-50 text-brand-800':'bg-warm-50 text-warm-700'}"><i data-lucide="${ok?'circle-check':'clock'}" class="ico-sm"></i>${t}${ok?'':' — pending'}</li>`).join('')}</ul>
+    <div class="grid grid-cols-2 gap-2 mt-5"><button class="btn-ghost !text-rose-700" onclick="rejectApp('${q.id}')"><i data-lucide="x"></i>Reject</button><button class="btn-primary" onclick="closeSheet();approveApp('${q.id}')"><i data-lucide="check"></i>Approve</button></div>`, true);
+}
+function approveApp(id, force=false){
+  const q = S.queue.find(x=>x.id===id); if (!q) return;
+  if (q.flags.length && !force){
+    openSheet(`<div class="w-12 h-12 rounded-2xl bg-warm-50 text-warm-700 grid place-items-center mb-3"><i data-lucide="triangle-alert"></i></div>
+      <h3 class="text-xl font-extrabold pr-10">Approve with open flags?</h3><ul class="mt-2 text-sm text-warm-700 list-disc pl-5">${q.flags.map(f=>`<li>${f}</li>`).join('')}</ul>
+      <p class="text-sm text-slate-600 mt-2">${q.name} will be activated in <b>shadow mode</b> until the flags are cleared.</p>
+      <div class="grid grid-cols-2 gap-2 mt-5"><button class="btn-ghost" onclick="closeSheet()">Cancel</button><button class="btn-primary" onclick="closeSheet();approveApp('${id}',true)">Approve</button></div>`);
+    return;
+  }
+  q.status = 'approved'; q.fresh = false;
+  if (q.type==='trainee') S.stats.trainees++; else S.stats.drivers++;
+  logEvent(`<b>${q.name}</b> approved · ${q.type==='trainee'?'trainee activated':'driver onboarded'}`, 'badge-check', 'teal', false);
+  emit(); toast(`${q.name} approved — welcome kit sent on WhatsApp`);
+}
+function rejectApp(id){
+  const q = S.queue.find(x=>x.id===id); if (!q) return;
+  openSheet(`<div class="w-12 h-12 rounded-2xl bg-rose-50 text-rose-700 grid place-items-center mb-3"><i data-lucide="user-x"></i></div>
+    <h3 class="text-xl font-extrabold pr-10">Reject ${q.name}?</h3><p class="text-slate-600 mt-1">They'll see the reason and can re-apply.</p>
+    <label class="lbl mt-4" for="rejReason">Reason</label>
+    <select id="rejReason" class="inp"><option>Document unclear / unreadable</option><option>ID not found in council registry</option><option>Police clearance not provided</option><option>Vehicle not Telangana-registered</option><option>Duplicate application</option></select>
+    <div class="grid grid-cols-2 gap-2 mt-5"><button class="btn-ghost" onclick="closeSheet()">Cancel</button><button class="btn-primary !bg-rose-600 hover:!bg-rose-700" onclick="confirmReject('${q.id}')"><i data-lucide="x"></i>Reject</button></div>`);
+}
+function confirmReject(id){
+  const q = S.queue.find(x=>x.id===id), reason = $('#rejReason').value;
+  q.status = 'rejected'; q.reason = reason; q.fresh = false; closeSheet();
+  logEvent(`<b>${q.name}</b> rejected — ${reason}`, 'user-x', 'red', false);
+  emit(); toast(`${q.name} rejected · applicant notified`, 'warn');
+}
+
+/* ---------- Live trips ---------- */
+function secTrips(){
+  const t = S.trip, ms = tripMs(), H = hosp(t.b.hospital), complete = tripComplete(), last = ms[t.done-1];
+  return `<div class="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6">
+    <div class="lg:col-span-5 min-w-0">
+      <div class="panel !p-0 overflow-hidden">
+        <div class="bg-brand-700 text-white p-4">
+          <div class="flex items-center justify-between text-xs"><span class="font-bold uppercase tracking-wider text-brand-100 flex items-center gap-2"><span class="w-2 h-2 rounded-full ${complete?'bg-white':'bg-warm-500 pulse-amber'}"></span>Tracked trip</span><span class="bg-white/15 rounded-full px-2.5 py-1 font-semibold">${t.b.id}</span></div>
+          <p class="text-lg font-extrabold mt-2">${t.b.patient.name}, ${t.b.patient.age}</p>
+          <p class="text-sm text-brand-100">${area(t.b.area).name} → ${hName(H)} · ${PACKAGES[t.b.pkg].short}</p>
+          <div class="h-2 rounded-full bg-white/20 mt-3"><div class="h-full rounded-full bg-white transition-all" style="width:${Math.round(t.done/ms.length*100)}%"></div></div>
+          <p class="text-sm font-bold mt-2">${complete?'Completed':(last?last.title:'Confirmed')}</p>
+        </div>
+        <ol class="p-4 space-y-2.5 max-h-[420px] overflow-y-auto scroll-thin">${ms.map((m,i)=>`<li class="flex items-center gap-3"><span class="w-7 h-7 rounded-full grid place-items-center shrink-0 ${i<t.done?'bg-brand-700 text-white':i===t.done?'bg-warm-600 text-white':'bg-slate-100 text-slate-400'}"><i data-lucide="${i<t.done?'check':m.icon}" class="ico-sm"></i></span><span class="flex-1 text-sm ${i>t.done?'text-slate-400':'font-semibold'}">${m.title}</span>${i<t.done?`<span class="text-xs text-slate-400">${fmtTime(t.times[i])}</span>`:''}</li>`).join('')}</ol>
+        <div class="px-4 pb-4"><a href="app.html#patient/track" class="btn-ghost w-full"><i data-lucide="smartphone"></i>Open in app</a></div>
+      </div>
+    </div>
+    <div class="lg:col-span-7 space-y-3 min-w-0">
+      <p class="text-sm text-slate-500"><b class="text-slate-800">${S.stats.active + LIVE_DELTA} active</b> across Hyderabad · showing a sample</p>
+      ${OTHER_TRIPS.map(x=>`<div class="panel">
+        <div class="flex items-start justify-between gap-2"><div class="min-w-0"><p class="font-extrabold">${x.p}</p><p class="text-sm text-slate-600 truncate">${x.r}</p></div><span class="text-xs font-semibold text-slate-400 shrink-0">${x.id}</span></div>
+        <div class="h-1.5 rounded-full bg-slate-100 mt-3"><div class="h-full rounded-full ${x.tone==='teal'?'bg-brand-600':'bg-warm-600'}" style="width:${x.pct}%"></div></div>
+        <div class="flex flex-wrap items-center gap-2 mt-3 text-xs"><span class="${x.tone==='teal'?'badge-ok':'badge-warn'}">${x.s}</span><span class="badge-slate"><i data-lucide="car" class="ico-sm"></i>${x.d}</span><span class="badge-slate"><i data-lucide="stethoscope" class="ico-sm"></i>${x.a}</span><span class="text-slate-500 ml-auto font-semibold">ETA ${x.eta}</span></div>
+      </div>`).join('')}
+    </div>
+  </div>`;
+}
+
+/* ---------- Hospitals ---------- */
+function secHospitals(){
+  const avg = Math.round(HOSPITALS.reduce((t,h)=>t+h.load,0)/HOSPITALS.length), att = Object.values(HSTAT).reduce((t,x)=>t+x[1],0);
+  const gate = {High:'badge-warn', Medium:'badge-slate', Low:'badge-ok'};
+  return `<p class="text-xs text-slate-500 mb-3"><b class="text-slate-800">7/7 online</b> · avg OPD load ${avg}% · ${att} attendants on site</p>
+  <div class="grid grid-cols-1 xl:grid-cols-2 gap-px bg-slate-200 rounded-2xl border border-slate-200 overflow-hidden shadow-sm xl:[&>*:last-child:nth-child(odd)]:col-span-2">${HOSPITALS.map(h=>{ const [g,n]=HSTAT[h.id]; return `
+    <div class="bg-white px-3 py-2.5">
+      <div class="flex items-center gap-2.5">
+        <span class="w-8 h-8 rounded-lg bg-warm-50 text-warm-700 grid place-items-center shrink-0 relative"><i data-lucide="hospital" class="ico-sm"></i><span class="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-brand-600 ring-2 ring-white" title="Online"></span></span>
+        <p class="flex-1 min-w-0 text-[15px] font-bold truncate">${h.name.split(' ')[0]} <span class="font-medium text-slate-500">· ${h.branch}</span></p>
+        <span class="${gate[g]} !py-0.5 shrink-0">Gate ${g}</span>
+      </div>
+      <div class="flex items-center gap-2 mt-2 pl-[2.6rem]">
+        <div class="flex-1 h-1.5 rounded-full bg-slate-100"><div class="h-full rounded-full ${h.load>85?'bg-warm-600':'bg-brand-600'}" style="width:${h.load}%"></div></div>
+        <span class="text-[11px] font-bold ${h.load>85?'text-warm-700':'text-slate-600'} w-14 text-right">OPD ${h.load}%</span>
+        <span class="text-[11px] font-bold text-slate-600 inline-flex items-center gap-0.5 w-9 justify-end"><i data-lucide="user-round" class="ico-sm"></i>${n}</span>
+      </div>
+      <p class="text-[11px] text-slate-400 truncate mt-1 pl-[2.6rem]">Drop: ${h.gate} · Parking: ${h.parking}</p>
+    </div>`; }).join('')}</div>`;
+}
+
+/* ---------- live ticking ---------- */
+const SYNTH = [
+  ['Driver <b>Syed Afzal</b> reached Yashoda Somajiguda · Gate 2','hospital','teal'],
+  ['Attendant <b>Deepika R.</b> signed off CT scan escort · CARE Banjara Hills','scan-line','amber'],
+  ['New booking: <b>Kondapur</b> → KIMS Kondapur (Ortho review)','calendar-plus','teal'],
+  ['<b>AIG Gachibowli</b> Gate 3 congestion rising — use Tower B porch','triangle-alert','amber'],
+  ['Driver <b>Mohammed Imran</b> started return trip to Kondapur','route','teal'],
+  ['Family rated attendant <b>Sravani K.</b> ★★★★★','star','teal'],
+];
+let si = 0;
+const tickClock = () => { $('#opsClock').textContent = new Date().toLocaleTimeString('en-IN',{timeZone:'Asia/Kolkata',hour:'numeric',minute:'2-digit',second:'2-digit'}); };
+tickClock(); setInterval(tickClock, 1000);
+setInterval(()=>{
+  LIVE_DELTA = Math.max(-6, Math.min(6, LIVE_DELTA + (Math.random()<.55?1:-1)));
+  TT = Math.max(150, Math.min(185, TT + (Math.random()<.5?1:-1)));
+  const z = ZONES[Math.floor(Math.random()*ZONES.length)]; z.req = Math.max(3, z.req + (Math.random()<.5?1:-1));
+  const [text, icon, tone] = SYNTH[si++ % SYNTH.length];
+  LOCAL_FEED.push({ts:Date.now(), text, icon, tone}); if (LOCAL_FEED.length>20) LOCAL_FEED.shift();
+  if (SEC==='overview' || SEC==='trips') render();
+}, 8000);
+
+render();
+</script>
+</body>
+</html>

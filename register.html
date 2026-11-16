@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0F766E">
+<title>Join AarogyaSetu · Partner Registration</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="assets/theme.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+Telugu:wght@500;700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+</head>
+<body class="bg-canvas text-slate-800 antialiased overflow-x-hidden">
+
+<div class="w-full min-h-[100dvh] flex flex-col bg-canvas">
+  <header class="sticky top-0 z-30 bg-white/95 backdrop-blur border-b border-slate-200">
+    <div class="px-4 h-16 flex items-center gap-3">
+      <button id="backBtn" class="w-11 h-11 -ml-2 rounded-full grid place-items-center hover:bg-slate-100" aria-label="Back"><i data-lucide="arrow-left"></i></button>
+      <div class="flex-1 min-w-0">
+        <p class="font-extrabold leading-tight truncate" id="hdrTitle">Join AarogyaSetu</p>
+        <p class="text-xs text-slate-500" id="hdrSub">Care partner registration · Hyderabad</p>
+      </div>
+      <button id="demoFill" class="hidden text-sm font-bold text-brand-700 rounded-full border border-brand-100 bg-brand-50 px-3 py-2 min-h-[40px]">Fill demo</button>
+    </div>
+    <div id="progress" class="h-1.5 bg-slate-100"><div class="h-full bg-brand-700 transition-all duration-500" style="width:0%"></div></div>
+  </header>
+  <main id="view" class="flex-1"></main>
+  <footer id="foot" class="sticky bottom-0 z-20 bg-white/95 backdrop-blur border-t border-slate-200 p-3 safe-b hidden"></footer>
+</div>
+
+<script src="assets/common.js"></script>
+<script>
+/* =========================================================
+   Partner registration — Medical Attendant / Fleet Driver
+   Mobile-first wizard; submissions land in the admin queue.
+   ========================================================= */
+const RTO = {'07':'Ranga Reddy','08':'Medchal–Malkajgiri','09':'Hyderabad Central (Khairatabad)','10':'Hyderabad North (Secunderabad)','11':'Hyderabad East (Malakpet)','12':'Hyderabad South (Bahadurpura)','13':'Hyderabad West (Mehdipatnam)','15':'Sangareddy'};
+const COLLEGES = ['Osmania Medical College, Koti','Gandhi Medical College, Secunderabad','Deccan College of Medical Sciences','Shadan Institute of Medical Sciences','Malla Reddy Institute of Medical Sciences','Apollo Institute of Medical Sciences','Govt. College of Nursing, Hyderabad','Apollo College of Nursing','Other (Telangana)'];
+const ATT_ROLES = {intern:['MBBS Intern / Junior Doctor','Telangana State Medical Council Reg. No.','TSMC/INT/2025/xxxxx'], nursing:['Nursing Student (B.Sc / GNM)','Telangana Nursing Council Student ID','TSNMC/STU/2023/xxxx'], para:['Paramedic / EMT','Paramedical Board Cert. No.','TSPMB/EMT/xxxx'], allied:['Allied Health (BPT, Radiology Tech)','Paramedical Board Reg. No.','TSPMB/AH/xxxx'], coord:['Trained Healthcare Coordinator','Training Certificate No.','HCC/HYD/xxxx']};
+const blank = () => ({ role:null, step:0, done:null, mobileVerified:false,
+  d:{ name:'', mobile:'', email:'', langs:['Telugu','English'], arole:'intern', college:COLLEGES[1], regno:'', year:'Internship (CRRI)', shifts:['Morning 7 AM–1 PM'], hosps:[], dl:'', police:'Cyberabad Police Commissionerate', plate:'', model:'Maruti Suzuki Ertiga', fuel:'CNG', wav:false, fa:false, zones:['Gachibowli'], c1:false, c2:false },
+  docs:{} });
+let R = blank();
+
+const DOCS = {
+  trainee:[['collegeId','College / institute ID card','Front & back',true],['council','Council ID / bonafide certificate','TSMC or Nursing Council',true],['aadhaar','Aadhaar (masked)','Only last 4 digits visible',false],['bls','BLS / first-aid certificate','Valid ≥ 6 months',false]],
+  driver:[['dlDoc','Driving licence','Both sides',true],['rc','Registration certificate (RC)','Smart card or PDF',true],['ins','Commercial insurance','Valid policy copy',true],['pcc','Police clearance certificate','Issued in last 6 months',false],['puc','PUC & fitness certificate','Pollution + RTA fitness',false],['photo','Vehicle photos','Front, rear, ramp/interior',false]],
+};
+
+/* ---------- step definitions ---------- */
+const STEPS = {
+  trainee:[
+    {t:'About you',        r:stepPersonal,  v:()=>R.d.name.trim().length>2 && R.mobileVerified},
+    {t:'Credentials',      r:stepCreds,     v:()=>R.d.regno.trim().length>4},
+    {t:'Availability',     r:stepAvail,     v:()=>R.d.shifts.length>0},
+    {t:'Documents',        r:stepDocs,      v:()=>DOCS.trainee.filter(x=>x[3]).every(x=>R.docs[x[0]])},
+    {t:'Review & consent', r:stepReview,    v:()=>R.d.c1 && R.d.c2},
+  ],
+  driver:[
+    {t:'About you',        r:stepPersonal,  v:()=>R.d.name.trim().length>2 && R.mobileVerified && /^(TS|TG)\d{2}\d{4}\d{7}$/.test(R.d.dl.replace(/[\s-]/g,''))},
+    {t:'Vehicle',          r:stepVehicle,   v:()=>!!plateMatch(R.d.plate)},
+    {t:'Zones & safety',   r:stepZones,     v:()=>R.d.zones.length>0 && R.d.fa},
+    {t:'Documents',        r:stepDocs,      v:()=>DOCS.driver.filter(x=>x[3]).every(x=>R.docs[x[0]])},
+    {t:'Review & consent', r:stepReview,    v:()=>R.d.c1 && R.d.c2},
+  ],
+};
+const plateMatch = v => (v||'').toUpperCase().replace(/\s/g,'').match(/^(TS|TG)(\d{2})([A-Z]{1,2})(\d{4})$/);
+
+/* ---------- small field helpers ---------- */
+const field = (key, label, attrs='', hint='') => `<div><label class="lbl" for="f_${key}">${label}</label><input id="f_${key}" data-k="${key}" class="inp" value="${(R.d[key]||'').toString().replace(/"/g,'&quot;')}" ${attrs}>${hint?`<p class="text-xs text-slate-500 mt-1" id="h_${key}">${hint}</p>`:''}</div>`;
+const select = (key, label, opts) => `<div><label class="lbl" for="f_${key}">${label}</label><select id="f_${key}" data-k="${key}" class="inp">${opts.map(o=>{ const [v,l] = Array.isArray(o)?o:[o,o]; return `<option value="${v}" ${R.d[key]===v?'selected':''}>${l}</option>`; }).join('')}</select></div>`;
+const chips = (key, items) => `<div class="flex flex-wrap gap-2">${items.map(i=>`<button type="button" class="chip ${R.d[key].includes(i)?'on':''}" data-chip="${key}" data-v="${i}">${i}</button>`).join('')}</div>`;
+const toggleRow = (key, icon, title, sub) => `<label class="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white p-4 cursor-pointer"><i data-lucide="${icon}" class="text-brand-700"></i><span class="flex-1"><b class="block">${title}</b><span class="text-sm text-slate-500">${sub}</span></span><button type="button" class="switch" role="switch" data-sw="${key}" aria-checked="${!!R.d[key]}"></button></label>`;
+
+function stepPersonal(){
+  return `<h2 class="text-2xl font-extrabold">Tell us about you</h2><p class="text-slate-500 mt-1">Use the name printed on your ${R.role==='driver'?'driving licence':'college ID'}.</p>
+  <div class="space-y-4 mt-5">
+    ${field('name','Full name','autocomplete="name" placeholder="e.g. '+(R.role==='driver'?'Mohammed Imran':'Sravani Kondapalli')+'"')}
+    <div><label class="lbl" for="f_mobile">Mobile number</label>
+      <div class="flex gap-2"><div class="flex flex-1"><span class="inp !w-auto !rounded-r-none border-r-0 bg-slate-50 font-bold">+91</span><input id="f_mobile" data-k="mobile" type="tel" inputmode="numeric" maxlength="10" class="inp !rounded-l-none" placeholder="98480 12345" value="${R.d.mobile}" ${R.mobileVerified?'readonly':''}></div>
+      <button type="button" id="verifyBtn" class="${R.mobileVerified?'btn-ghost !text-brand-700':'btn-ghost'} shrink-0" ${R.mobileVerified?'disabled':''}>${R.mobileVerified?'<i data-lucide="badge-check"></i>Verified':'Get OTP'}</button></div></div>
+    ${field('email','Email <span class="font-medium text-slate-400">(optional)</span>','type="email" inputmode="email" placeholder="you@example.com"')}
+    ${R.role==='driver' ? field('dl','Driving licence number','class="inp uppercase" placeholder="TS0920190045521"','Commercial (transport) endorsement required') + select('police','Police verification by',['Cyberabad Police Commissionerate','Hyderabad City Police','Rachakonda Police Commissionerate']) : ''}
+    <div><p class="lbl">Languages you speak</p>${chips('langs',['Telugu','Hindi','Urdu','English','Dakhini','Tamil','Kannada'])}</div>
+  </div>`;
+}
+function stepCreds(){
+  const [, idLbl, ph] = ATT_ROLES[R.d.arole];
+  return `<h2 class="text-2xl font-extrabold">Your medical credentials</h2><p class="text-slate-500 mt-1">We verify these with your college and council.</p>
+  <div class="space-y-4 mt-5">
+    <div><p class="lbl">You are a…</p><div class="space-y-2">${Object.entries(ATT_ROLES).map(([k,[l]])=>`<button type="button" class="card-opt !p-3.5 flex items-center gap-3 ${R.d.arole===k?'on':''}" data-arole="${k}"><span class="w-5 h-5 rounded-full border-2 ${R.d.arole===k?'border-brand-700 bg-brand-700 ring-4 ring-brand-100':'border-slate-300'}"></span><span class="font-bold">${l}</span></button>`).join('')}</div></div>
+    ${select('college','College / institute',COLLEGES)}
+    ${field('regno', idLbl, `class="inp uppercase" placeholder="${ph}"`)}
+    ${select('year','Year / level',['Internship (CRRI)','Final year','3rd year','Post-graduate','Certified professional'])}
+  </div>`;
+}
+function stepAvail(){
+  return `<h2 class="text-2xl font-extrabold">When can you work?</h2><p class="text-slate-500 mt-1">Pick shifts and hospitals you can reach easily.</p>
+  <div class="space-y-5 mt-5">
+    <div><p class="lbl">Shifts</p>${chips('shifts',['Morning 7 AM–1 PM','Afternoon 1–7 PM','Evening 5–10 PM','Weekends only','On-call (post-op)'])}</div>
+    <div><p class="lbl">Preferred hospitals</p>${chips('hosps',HOSPITALS.map(hName))}</div>
+    <div class="rounded-2xl bg-brand-50 border border-brand-100 p-4 text-sm text-brand-800"><b>Earn ₹180–₹260/hr</b> plus ₹50 per scan escort. Payouts every Monday via UPI.</div>
+  </div>`;
+}
+function stepVehicle(){
+  const m = plateMatch(R.d.plate);
+  return `<h2 class="text-2xl font-extrabold">Your vehicle</h2><p class="text-slate-500 mt-1">Telangana-registered vehicles only.</p>
+  <div class="space-y-4 mt-5">
+    <div><label class="lbl" for="f_plate">Registration number</label>
+      <div class="rounded-2xl border-2 ${m?'border-brand-700':'border-slate-900'} bg-white flex items-stretch overflow-hidden"><div class="bg-blue-700 text-white text-[10px] font-bold px-2 flex flex-col justify-center items-center leading-tight">🇮🇳<span>IND</span></div>
+      <input id="f_plate" data-k="plate" class="plate flex-1 min-w-0 text-2xl font-extrabold px-3 py-3 uppercase outline-none" placeholder="TS 09 UB 4521" value="${R.d.plate}" autocomplete="off"></div>
+      <p class="text-xs mt-1.5" id="plateMsg">${plateHint()}</p></div>
+    ${select('model','Vehicle model',['Maruti Suzuki Ertiga','Toyota Innova Crysta','Maruti Suzuki Dzire','Hyundai Aura','Maruti Eeco (WAV conversion)','Force Traveller (WAV)'])}
+    ${select('fuel','Fuel',['CNG','Diesel','Petrol','Electric'])}
+    ${toggleRow('wav','accessibility','Wheelchair-accessible','Ramp / lift + floor lock points')}
+  </div>`;
+}
+function plateHint(){
+  const m = plateMatch(R.d.plate);
+  if (m) return `<span class="text-brand-700 font-bold">✓ Valid · ${m[1]}-${m[2]} ${RTO[m[2]]||'Telangana RTO'}</span>`;
+  if (R.d.plate.length>3) return `<span class="text-warm-700 font-bold">Format: TS 09 UB 4521 or TG 07 AB 1234</span>`;
+  return '<span class="text-slate-500">TS (pre-2024) and new TG series both accepted</span>';
+}
+function stepZones(){
+  return `<h2 class="text-2xl font-extrabold">Zones & patient safety</h2><p class="text-slate-500 mt-1">Where you'd like to receive trips.</p>
+  <div class="space-y-5 mt-5">
+    <div><p class="lbl">Preferred pickup zones</p>${chips('zones',AREAS.map(a=>a.name))}</div>
+    ${toggleRow('fa','cross','First-aid & patient handling','I completed the 4-hr AarogyaSetu module (required)')}
+    <div class="rounded-2xl bg-warm-50 border border-warm-200 p-4 text-sm text-warm-700"><b>Safety rules:</b> OTP at every pickup and handover, no unscheduled stops, and never leave a patient alone at the gate.</div>
+  </div>`;
+}
+function stepDocs(){
+  const list = DOCS[R.role];
+  return `<h2 class="text-2xl font-extrabold">Upload documents</h2><p class="text-slate-500 mt-1">Photos from your phone are fine. Required items are marked.</p>
+  <div class="space-y-3 mt-5">${list.map(([id,label,hint,req])=>{ const f = R.docs[id]; return `
+    <label class="flex items-center gap-3 rounded-2xl border ${f?'border-brand-600 bg-brand-50/50':'border-dashed border-slate-300 bg-white'} p-3.5 cursor-pointer" data-up="${id}">
+      <span class="w-12 h-12 rounded-xl ${f?'bg-brand-700 text-white':'bg-slate-100 text-slate-500'} grid place-items-center shrink-0 up-ic"><i data-lucide="${f?'check':'camera'}"></i></span>
+      <span class="flex-1 min-w-0"><span class="block font-bold">${label}${req?' <span class="text-rose-600">*</span>':''}</span><span class="block text-sm text-slate-500 truncate up-st">${f?f+' · uploaded':hint}</span>
+        <span class="block h-1.5 rounded-full bg-slate-100 mt-1.5 overflow-hidden hidden up-bar"><span class="block h-full bg-brand-600 w-0 transition-all duration-700"></span></span></span>
+      <input type="file" class="hidden" accept="image/*,.pdf" capture="environment"></label>`; }).join('')}</div>
+  <p class="text-xs text-slate-500 mt-4 flex items-center gap-1.5"><i data-lucide="lock" class="ico-sm"></i>Encrypted · reviewed only by AarogyaSetu Hyderabad ops</p>`;
+}
+function stepReview(){
+  const d = R.d, isD = R.role==='driver', m = plateMatch(d.plate);
+  const rows = isD
+    ? [['Name',d.name],['Mobile','+91 '+d.mobile+' ✓'],['Licence',d.dl.toUpperCase()],['Police',d.police.replace(' Commissionerate','')],['Vehicle',(m?`${m[1]} ${m[2]} ${m[3]} ${m[4]}`:d.plate)+' · '+d.model],['Wheelchair',d.wav?'Yes':'No'],['Zones',d.zones.join(', ')],['Documents',Object.keys(R.docs).length+' uploaded']]
+    : [['Name',d.name],['Mobile','+91 '+d.mobile+' ✓'],['Role',ATT_ROLES[d.arole][0]],['College',d.college],['ID',d.regno.toUpperCase()],['Languages',d.langs.join(', ')],['Shifts',d.shifts.join(', ')],['Documents',Object.keys(R.docs).length+' uploaded']];
+  return `<h2 class="text-2xl font-extrabold">Review & submit</h2>
+  <div class="mt-5 rounded-2xl bg-white border border-slate-200 divide-y divide-slate-100">${rows.map(([k,v])=>`<div class="flex justify-between gap-4 p-3.5 text-sm"><span class="text-slate-500 shrink-0">${k}</span><span class="font-bold text-right">${v||'—'}</span></div>`).join('')}</div>
+  <div class="space-y-3 mt-5">
+    <label class="flex items-start gap-3 rounded-2xl bg-white border border-slate-200 p-4 cursor-pointer"><input type="checkbox" data-cb="c1" class="mt-0.5 w-6 h-6 accent-teal-700" ${d.c1?'checked':''}><span class="text-sm">I consent to verification of my documents${isD?' with the RTA and police':' with my college and council'}, under the DPDP Act, 2023.</span></label>
+    <label class="flex items-start gap-3 rounded-2xl bg-white border border-slate-200 p-4 cursor-pointer"><input type="checkbox" data-cb="c2" class="mt-0.5 w-6 h-6 accent-teal-700" ${d.c2?'checked':''}><span class="text-sm">${isD?'I follow the patient-safety rules: OTP handovers, no unscheduled stops, wheelchair securing.':'I escort and coordinate only — no prescribing, medication or clinical decisions.'}</span></label>
+  </div>`;
+}
+
+/* ---------- rendering ---------- */
+function setProgress(p){ $('#progress div').style.width = p+'%'; }
+function render(){
+  const v = $('#view'), f = $('#foot');
+  $('#demoFill').classList.toggle('hidden', !R.role || !!R.done);
+  if (R.done) return renderDone();
+  if (!R.role){
+    $('#hdrTitle').textContent = 'Join AarogyaSetu'; $('#hdrSub').textContent = 'Care partner registration · Hyderabad'; setProgress(0); f.classList.add('hidden');
+    const mine = S.myApps.map(id=>S.queue.find(q=>q.id===id)).filter(Boolean);
+    v.innerHTML = `<div class="fade-in">
+      <div class="bg-brand-700 text-white px-5 pt-6 pb-8">
+        <p class="te text-brand-100 font-bold">ఆరోగ్య సేతు</p>
+        <h1 class="text-[1.65rem] font-extrabold leading-tight mt-1">Help Hyderabad's patients reach care safely.</h1>
+        <p class="text-brand-100 mt-2">Flexible shifts, weekly UPI payouts, and real hospital experience.</p>
+      </div>
+      <div class="px-4 -mt-4 space-y-3 pb-8">
+        ${[['trainee','stethoscope','Medical Attendant','MBBS interns, nursing students, paramedics & trained coordinators','Escort patients inside partner hospitals'],
+           ['driver','car','Fleet Driver','Commercial licence + Telangana-registered vehicle','Safe door-to-hospital pickups & drops']]
+          .map(([k,ic,t,s,x])=>`<button onclick="startRole('${k}')" class="w-full text-left panel !p-5 flex items-start gap-4 hover:border-brand-600 active:scale-[.99] transition">
+            <span class="w-14 h-14 rounded-2xl ${k==='driver'?'bg-slate-800':'bg-brand-700'} text-white grid place-items-center shrink-0"><i data-lucide="${ic}"></i></span>
+            <span class="flex-1"><b class="text-lg block">${t}</b><span class="text-sm text-slate-600 block">${s}</span><span class="text-sm text-brand-700 font-bold block mt-1">${x}</span></span>
+            <i data-lucide="chevron-right" class="text-slate-400 mt-4"></i></button>`).join('')}
+        <div class="grid grid-cols-3 gap-2 pt-2 text-center">${[['shield-check','Verified KYC'],['wallet','Weekly payouts'],['clock','Pick your shifts']].map(([i,l])=>`<div class="rounded-2xl bg-white border border-slate-200 p-3"><i data-lucide="${i}" class="mx-auto text-brand-700"></i><p class="text-xs font-bold mt-1">${l}</p></div>`).join('')}</div>
+        ${mine.length?`<div class="pt-4"><h2 class="h2 mb-2">My applications</h2>${mine.map(appCard).join('')}</div>`:''}
+        <p class="text-center text-sm text-slate-500 pt-4"><a href="app.html" class="font-bold text-brand-700">Open the app</a> · <a href="admin.html" class="font-bold text-brand-700">Ops admin</a></p>
+      </div></div>`;
+    icons(); return;
+  }
+  const steps = STEPS[R.role], s = steps[R.step];
+  $('#hdrTitle').textContent = R.role==='driver' ? 'Driver registration' : 'Attendant registration';
+  $('#hdrSub').textContent = `Step ${R.step+1} of ${steps.length} · ${s.t}`;
+  setProgress(Math.round((R.step+1)/steps.length*100));
+  v.innerHTML = `<div class="px-4 pt-5 pb-8 fade-in">${s.r()}</div>`;
+  f.classList.remove('hidden');
+  f.innerHTML = `<button id="nextBtn" class="btn-primary w-full">${R.step<steps.length-1?'Continue':'Submit application'}<i data-lucide="${R.step<steps.length-1?'arrow-right':'send'}"></i></button>`;
+  $('#nextBtn').onclick = next;
+  bind(); sync(); icons();
+}
+function sync(){ const b = $('#nextBtn'); if (b) b.disabled = !STEPS[R.role][R.step].v(); }
+function bind(){
+  $$('[data-k]').forEach(el => {
+    const ev = el.tagName==='SELECT' ? 'change' : 'input';
+    el.addEventListener(ev, () => {
+      let v = el.value;
+      if (el.dataset.k==='mobile') { v = v.replace(/\D/g,''); el.value = v; }
+      if (['dl','plate','regno'].includes(el.dataset.k)) { v = v.toUpperCase(); el.value = v; }
+      R.d[el.dataset.k] = v;
+      if (el.dataset.k==='plate') $('#plateMsg').innerHTML = plateHint();
+      sync();
+    });
+  });
+  $$('[data-chip]').forEach(c => c.addEventListener('click', () => {
+    const k = c.dataset.chip, v = c.dataset.v, arr = R.d[k];
+    const i = arr.indexOf(v); i>=0 ? arr.splice(i,1) : arr.push(v);
+    c.classList.toggle('on'); sync();
+  }));
+  $$('[data-sw]').forEach(s => s.addEventListener('click', e => { e.preventDefault(); const k=s.dataset.sw; R.d[k]=!R.d[k]; s.setAttribute('aria-checked', R.d[k]); sync(); }));
+  $$('[data-cb]').forEach(c => c.addEventListener('change', () => { R.d[c.dataset.cb] = c.checked; sync(); }));
+  $$('[data-arole]').forEach(b => b.addEventListener('click', () => { R.d.arole = b.dataset.arole; render(); }));
+  const vb = $('#verifyBtn');
+  if (vb) vb.addEventListener('click', () => {
+    if (!/^[6-9]\d{9}$/.test(R.d.mobile)) { toast('Enter a valid 10-digit mobile number','warn'); return; }
+    openOtp('Verify your mobile', `We sent a 4-digit code to +91 ${R.d.mobile}.`, () => { R.mobileVerified = true; toast('Mobile number verified'); render(); });
+  });
+  $$('[data-up]').forEach(row => {
+    const inp = $('input', row);
+    inp.addEventListener('change', () => {
+      const f = inp.files[0]; if (!f) return;
+      $('.up-bar', row).classList.remove('hidden'); $('.up-st', row).textContent = 'Uploading & running checks…';
+      requestAnimationFrame(() => { $('.up-bar span', row).style.width = '100%'; });
+      setTimeout(() => { R.docs[row.dataset.up] = f.name.length>26 ? f.name.slice(0,23)+'…' : f.name; render(); }, 850);
+    });
+  });
+}
+function next(){
+  const steps = STEPS[R.role];
+  if (!steps[R.step].v()) return;
+  if (R.step < steps.length-1){ R.step++; render(); window.scrollTo(0,0); return; }
+  submit();
+}
+function startRole(k){ R = blank(); R.role = k; if (k==='driver') R.d.langs=['Telugu','Hindi']; render(); window.scrollTo(0,0); }
+$('#backBtn').onclick = () => {
+  if (R.done){ R = blank(); render(); return; }
+  if (!R.role){ location.href = 'index.html'; return; }
+  if (R.step>0){ R.step--; render(); } else { R.role = null; render(); }
+};
+$('#demoFill').onclick = () => {
+  const isD = R.role==='driver';
+  Object.assign(R.d, isD
+    ? {name:'Syed Afzal', mobile:'9866012345', dl:'TS1320180067788', plate:'TG 13 CD 7742', model:'Maruti Eeco (WAV conversion)', wav:true, fa:true, zones:['Banjara Hills','Somajiguda'], police:'Hyderabad City Police', langs:['Urdu','Telugu','Hindi']}
+    : {name:'Deepika Rao', mobile:'9705512345', arole:'nursing', college:'Apollo College of Nursing', regno:'TSNMC/STU/2023/6612', year:'Final year', shifts:['Morning 7 AM–1 PM','Weekends only'], hosps:['Apollo Jubilee Hills','CARE Banjara Hills'], langs:['Telugu','English','Hindi']});
+  R.mobileVerified = true;
+  DOCS[R.role].forEach(([id]) => R.docs[id] = id + '_scan.jpg');
+  toast('Demo details filled — review each step','info'); render();
+};
+function submit(){
+  const d = R.d, isD = R.role==='driver', m = plateMatch(d.plate);
+  const pretty = m ? `${m[1]} ${m[2]} ${m[3]} ${m[4]}` : '';
+  const app = {
+    id:(isD?'DR-':'TR-')+((isD?2209:1045)+Math.floor(Math.random()*400)), type:isD?'driver':'trainee', name:d.name.trim(),
+    sub: isD ? `${pretty} · ${d.model}${d.wav?' · WAV':''}` : `${ATT_ROLES[d.arole][0]} · ${d.college}`,
+    idno: isD ? 'DL '+d.dl.toUpperCase() : d.regno.toUpperCase(),
+    docs: DOCS[R.role].filter(x=>R.docs[x[0]]).map(x=>x[1]),
+    flags: isD ? (R.docs.pcc?[]:[`Police clearance pending — ${d.police.replace(' Commissionerate','')}`]) : (R.docs.bls?[]:['BLS certificate not uploaded']),
+    ts:Date.now(), langs:d.langs.join(', '), status:'pending', fresh:true,
+  };
+  S.queue.unshift(app); S.myApps.unshift(app.id);
+  logEvent(`New ${isD?'driver':'trainee'} application <b>${app.name}</b> (${app.id})`, isD?'car':'user-plus', 'amber', false);
+  emit();
+  R.done = app.id; render(); window.scrollTo(0,0);
+  toast('Application submitted');
+}
+function appStatus(q){
+  return q.status==='approved' ? ['Approved','badge-ok',3] : q.status==='rejected' ? ['Not approved','badge-red',1] : ['Under review','badge-warn',1];
+}
+function appCard(q){
+  const [label, cls] = appStatus(q);
+  return `<button onclick="R.done='${q.id}';render()" class="w-full text-left panel flex items-center gap-3 mb-2"><span class="w-11 h-11 rounded-xl ${q.type==='driver'?'bg-slate-800':'bg-brand-700'} text-white grid place-items-center"><i data-lucide="${q.type==='driver'?'car':'stethoscope'}"></i></span><span class="flex-1 min-w-0"><b class="block truncate">${q.name}</b><span class="text-sm text-slate-500">${q.id} · ${ago(q.ts)}</span></span><span class="${cls}">${label}</span></button>`;
+}
+function renderDone(){
+  const q = S.queue.find(x=>x.id===R.done); if (!q){ R = blank(); return render(); }
+  const [label, cls, lvl] = appStatus(q), isD = q.type==='driver';
+  $('#hdrTitle').textContent = 'Application ' + q.id; $('#hdrSub').textContent = 'Live status'; setProgress(100); $('#foot').classList.add('hidden');
+  const steps = [['Submitted','file-check-2'],[isD?'Documents & police check':'Council & college check','search-check'],[isD?'Vehicle inspection':'Video interview',isD?'car':'video'],['Activated','badge-check']];
+  const reached = q.status==='approved' ? 4 : q.status==='rejected' ? 1 : 2;
+  $('#view').innerHTML = `<div class="px-4 py-6 fade-in">
+    <div class="text-center">
+      <div class="w-20 h-20 mx-auto rounded-full ${q.status==='rejected'?'bg-rose-50 text-rose-600':'bg-brand-50 text-brand-700'} grid place-items-center ${q.status==='pending'?'pulse-teal':''}"><i data-lucide="${q.status==='approved'?'party-popper':q.status==='rejected'?'circle-x':'hourglass'}" class="!w-10 !h-10"></i></div>
+      <h1 class="text-2xl font-extrabold mt-4">${q.status==='approved'?'You\'re approved, '+q.name.split(' ')[0]+'!':q.status==='rejected'?'Application not approved':'Thanks, '+q.name.split(' ')[0]+'!'}</h1>
+      <p class="mt-2"><span class="${cls}">${label}</span></p>
+      <p class="text-slate-600 mt-3">${q.status==='approved'?'Your welcome kit and app login are on WhatsApp.':q.status==='rejected'?(q.reason||'Please check your documents and re-apply.'):'Our Hyderabad ops team usually reviews within 24 hrs. This page updates automatically.'}</p>
+    </div>
+    <div class="panel mt-6">${steps.map(([t,ic],i)=>`<div class="flex items-center gap-3 py-2.5"><span class="w-10 h-10 rounded-full grid place-items-center shrink-0 ${i<reached?'bg-brand-700 text-white':i===reached&&q.status==='pending'?'bg-warm-50 text-warm-700 border-2 border-warm-600':'bg-slate-100 text-slate-400'}"><i data-lucide="${i<reached?'check':ic}" class="ico-sm"></i></span><span class="font-bold ${i<reached||i===reached?'':'text-slate-400'}">${t}</span></div>`).join('')}</div>
+    <div class="grid gap-2 mt-6">
+      ${q.status==='approved'?`<a href="app.html#${isD?'driver':'attendant'}" class="btn-primary"><i data-lucide="smartphone"></i>Open partner app</a>`:''}
+      <a href="admin.html#verify" target="_blank" class="btn-ghost"><i data-lucide="layout-dashboard"></i>Review it in Ops admin (demo)</a>
+      <button class="btn-ghost" onclick="R=blank();render()"><i data-lucide="house"></i>Back to start</button>
+    </div></div>`;
+  icons();
+}
+onState(() => { if (R.done || !R.role) render(); });
+render();
+</script>
+</body>
+</html>

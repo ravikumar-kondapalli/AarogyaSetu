@@ -1,0 +1,816 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0F766E">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="AarogyaSetu">
+<title>AarogyaSetu App · Hyderabad</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="assets/theme.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Noto+Sans+Telugu:wght@500;700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  .leaflet-container{font-family:inherit;background:#E8EEF1}
+  .leaflet-bottom{bottom:22px}
+  .leaflet-control-attribution{font-size:9px;background:rgba(255,255,255,.7)!important}
+  .hosp-mk{width:28px;height:28px;border-radius:9px;background:#D97706;color:#fff;font-weight:800;font-size:18px;line-height:1;display:grid;place-items:center;box-shadow:0 2px 8px rgba(0,0,0,.3);border:2px solid #fff}
+  .hosp-lbl{position:absolute;left:32px;top:4px;white-space:nowrap;font-size:11px;font-weight:700;color:#7C2D12;background:rgba(255,255,255,.9);padding:1px 6px;border-radius:6px}
+  #pinWrap{transform:translate(-50%,-100%);transition:transform .18s ease}
+  #pinWrap.lift{transform:translate(-50%,calc(-100% - 12px))}
+  #pinShadow{transition:all .18s ease}
+  #pinWrap.lift + #pinShadow{width:18px;opacity:.5}
+</style>
+</head>
+<body class="bg-canvas text-slate-800 antialiased overflow-hidden">
+
+<!-- Full-screen mobile app shell -->
+<div id="appFrame" class="relative w-full h-[100dvh] bg-canvas overflow-hidden flex flex-col">
+  <header class="shrink-0 bg-white border-b border-slate-200 px-4 pt-3 pb-3 flex items-center gap-3">
+    <div class="w-10 h-10 rounded-2xl bg-brand-700 text-white grid place-items-center shrink-0"><i data-lucide="heart-pulse"></i></div>
+    <div class="min-w-0 flex-1">
+      <p class="font-extrabold text-slate-900 leading-tight truncate">Aarogya<span class="text-brand-700">Setu</span> <span class="te text-xs text-brand-700 font-bold hidden min-[400px]:inline">ఆరోగ్య సేతు</span></p>
+      <p class="text-xs text-slate-500 truncate" id="hdrSub">Door → Doctor → Door</p>
+    </div>
+    <button id="roleBtn" onclick="openRoleSheet()" class="inline-flex items-center gap-1.5 rounded-full bg-brand-50 border border-brand-100 text-brand-800 pl-2.5 pr-2 py-2 text-sm font-bold min-h-[44px]"></button>
+  </header>
+
+  <main id="screen" class="flex-1 overflow-y-auto scroll-thin"></main>
+
+  <nav id="bottomNav" class="shrink-0 bg-white border-t border-slate-200 grid safe-b"></nav>
+</div>
+
+<script src="assets/common.js"></script>
+<script>
+// Keep sheets & toasts inside the phone frame (on desktop the app is shown in a phone mock-up)
+(function(){ const f = document.getElementById('appFrame'), sr = document.getElementById('sheetRoot'), ts = document.getElementById('toastStack');
+  f.appendChild(sr); sr.classList.replace('fixed','absolute');
+  sr.children[1].className = 'absolute inset-x-0 bottom-0 pointer-events-none';
+  f.appendChild(ts); ts.classList.replace('fixed','absolute'); ts.style.width = 'calc(100% - 1.5rem)'; })();
+const _openSheet = openSheet;
+openSheet = (html, wide) => { _openSheet(html, wide); const c = document.getElementById('sheetCard'); c.className = c.className.replace(/sm:\S+/g,'') + ' rounded-t-3xl max-h-[85%]'; };
+/* =========================================================
+   AarogyaSetu mobile app — Patient · Attendant · Driver
+   ========================================================= */
+const ROLES = {
+  patient:   {label:'Patient',   icon:'heart-handshake', sub:'Karthik Chilukuri · Family account'},
+  attendant: {label:'Attendant', icon:'stethoscope',     sub:'Rahul Reddy · Medical Intern'},
+  driver:    {label:'Driver',    icon:'car',             sub:'Srinivas Goud · TS 09 UB 4521'},
+};
+const NAV = {
+  patient:  [['book','Book','calendar-plus'],['track','Track','radar'],['visits','Visits','history'],['me','Account','user-round']],
+  attendant:[['duty','Duty','clipboard-check'],['patient','Patient','notebook-pen'],['me','Account','user-round']],
+  driver:   [['trip','Trip','navigation'],['schedule','Schedule','calendar-clock'],['me','Account','user-round']],
+};
+let ROLE = 'patient', TAB = 'book', CAR_T = null, AUTO = true;
+const TICK_MS = 5000;
+(function initRoute(){
+  const [r,t] = location.hash.slice(1).split('/');
+  if (ROLES[r]) ROLE = r;
+  TAB = (t && NAV[ROLE].some(n=>n[0]===t)) ? t : NAV[ROLE][0][0];
+})();
+
+function go(role, tab){
+  if (role && role!==ROLE){ ROLE = role; tab = tab || NAV[role][0][0]; }
+  if (tab) TAB = tab;
+  history.replaceState(null,'',`#${ROLE}/${TAB}`);
+  render(true);
+}
+function openRoleSheet(){
+  openSheet(`<h3 class="text-xl font-extrabold pr-10">Switch app view</h3><p class="text-sm text-slate-500 mb-4">Demo: one app, three signed-in users</p>
+    <div class="space-y-2">${Object.entries(ROLES).map(([k,r])=>`
+      <button onclick="closeSheet();go('${k}')" class="card-opt ${k===ROLE?'on':''} flex items-center gap-3">
+        <span class="w-11 h-11 rounded-xl ${k===ROLE?'bg-brand-700 text-white':'bg-slate-100 text-slate-600'} grid place-items-center"><i data-lucide="${r.icon}"></i></span>
+        <span class="flex-1"><b class="block">${r.label} app</b><span class="text-sm text-slate-500">${r.sub}</span></span>${k===ROLE?'<i data-lucide="check" class="text-brand-700"></i>':''}</button>`).join('')}</div>
+    <div class="grid grid-cols-2 gap-2 mt-4">
+      <a href="register.html" class="btn-ghost"><i data-lucide="user-plus"></i>Partner sign-up</a>
+      <a href="admin.html" class="btn-ghost"><i data-lucide="layout-dashboard"></i>Ops admin</a>
+    </div>`);
+}
+
+function renderChrome(){
+  const r = ROLES[ROLE];
+  $('#roleBtn').innerHTML = `<i data-lucide="${r.icon}" class="ico-sm"></i>${r.label}<i data-lucide="chevron-down" class="ico-sm"></i>`;
+  $('#hdrSub').textContent = r.sub;
+  const live = !tripComplete();
+  const nav = NAV[ROLE];
+  $('#bottomNav').style.gridTemplateColumns = `repeat(${nav.length}, minmax(0,1fr))`;
+  $('#bottomNav').innerHTML = nav.map(([k,l,ic])=>`<button class="navbtn ${TAB===k?'active':''}" onclick="go(null,'${k}')">
+      ${TAB===k?'<span class="absolute top-0 inset-x-6 h-1 rounded-b-full bg-brand-700"></span>':''}
+      <i data-lucide="${ic}"></i>${l}
+      ${live && ((ROLE==='patient'&&k==='track')||(ROLE==='attendant'&&k==='duty')||(ROLE==='driver'&&k==='trip'))?'<span class="absolute top-2.5 right-[calc(50%-18px)] w-2.5 h-2.5 rounded-full bg-warm-600 ring-2 ring-white"></span>':''}
+    </button>`).join('');
+}
+function render(scrollTop=false){
+  renderChrome();
+  if (PMAP && !(ROLE==='patient' && TAB==='book' && BK.step===1)) destroyPickMap();
+  const views = {
+    'patient/book':renderBook, 'patient/track':renderTrack, 'patient/visits':renderVisits, 'patient/me':renderPatientMe,
+    'attendant/duty':renderDuty, 'attendant/patient':renderAttPatient, 'attendant/me':renderAttMe,
+    'driver/trip':renderDriverTrip, 'driver/schedule':renderDriverSchedule, 'driver/me':renderDriverMe,
+  };
+  views[ROLE+'/'+TAB]();
+  if (scrollTop) $('#screen').scrollTop = 0;
+  icons();
+  if (ROLE==='patient' && TAB==='track') placeCar();
+}
+onState(() => {
+  // Booking screen & focused inputs keep their state; only the tab bar refreshes.
+  const ae = document.activeElement;
+  if ((ROLE==='patient' && TAB==='book') || (ae && $('#screen').contains(ae) && /INPUT|TEXTAREA|SELECT/.test(ae.tagName))){ renderChrome(); icons(); return; }
+  render();
+});
+const screen = html => { $('#screen').innerHTML = `<div class="fade-in">${html}</div>`; };
+const sectionTitle = (t, s='') => `<div class="px-4 pt-5 pb-3"><h1 class="text-2xl font-extrabold text-slate-900">${t}</h1>${s?`<p class="text-slate-500 text-sm mt-0.5">${s}</p>`:''}</div>`;
+
+/* =========================================================
+   PATIENT — Book
+   ========================================================= */
+const STEP_NAMES = ['Area','Hospital','Package','Needs','Confirm'];
+const BK_DEFAULT = () => ({ step:1, pin:'', area:null, address:'', flat:'', lat:null, lng:null, landmark:'', hospital:null, pkg:'full', needs:new Set(['elderly']), vehicle:'sedan', patient:{name:'',age:'',phone:'',lang:'Telugu'}, dept:'', date:'', time:'10:00 AM', notes:'', pay:'upi', ack:false });
+let BK = BK_DEFAULT();
+
+function bookingValid(){
+  switch (BK.step){
+    case 1: return !!BK.area && BK.address.trim().length > 5;
+    case 2: return !!BK.hospital;
+    case 3: return !!BK.pkg;
+    case 4: return BK.patient.name.trim().length>1 && +BK.patient.age>0 && +BK.patient.age<120 && /^[6-9]\d{9}$/.test(BK.patient.phone) && !!BK.dept;
+    case 5: return BK.ack;
+  }
+}
+function syncFooter(){ const b = $('#bkNext'); if (b) b.disabled = !bookingValid(); }
+function quote(pkg=BK.pkg){
+  const A = area(BK.area), H = hosp(BK.hospital), P = PACKAGES[pkg];
+  const d = (A && H) ? km(A,H) : 8, lines = [];
+  lines.push([P.name, P.base]);
+  if (P.perKm) lines.push([`${d.toFixed(1)} km × 2 legs @ ₹${P.perKm}/km`, d*2*P.perKm]);
+  NEEDS.filter(n => BK.needs.has(n.id) && (pkg!=='ride' || n.ride)).forEach(n => lines.push([n.name, n.price]));
+  if (BK.vehicle==='wav' && pkg!=='companion') lines.push(['Wheelchair-accessible van', 249]);
+  lines.push(['Platform & safety fee', 49]);
+  const sub = lines.reduce((s,l)=>s+l[1],0);
+  if (+BK.patient.age >= 60) lines.push(['Senior citizen discount (10%)', -sub*0.10]);
+  return {lines, total: lines.reduce((s,l)=>s+l[1],0), d};
+}
+
+function renderBook(){
+  if (BK.step===1) return renderPickup();
+  let h = '';
+  if (BK.step===2){
+    const A = area(BK.area);
+    const list = HOSPITALS.map(H=>({H, d:km(A,H)})).sort((x,y)=>x.d-y.d);
+    h = `<h2 class="text-xl font-extrabold">Choose partner hospital</h2><p class="text-sm text-slate-500 mt-1">Nearest to ${A.name} first</p>
+      <div class="space-y-3 mt-4">${list.map(({H,d},i)=>`
+        <button class="card-opt ${BK.hospital===H.id?'on':''}" onclick="BK.hospital='${H.id}';BK.dept='';renderBook();icons()">
+          <div class="flex items-start gap-3">
+            <div class="w-11 h-11 rounded-xl bg-warm-50 text-warm-700 grid place-items-center shrink-0"><i data-lucide="hospital"></i></div>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 flex-wrap"><p class="font-extrabold">${H.name}</p>${i===0?'<span class="badge-ok">Nearest</span>':''}</div>
+              <p class="text-sm text-slate-600">${H.branch} · ${d.toFixed(1)} km · ~${etaMin(d)} min</p>
+              <div class="flex items-center gap-2 mt-2"><div class="flex-1 h-1.5 rounded-full bg-slate-100"><div class="h-full rounded-full ${H.load>85?'bg-warm-600':'bg-brand-600'}" style="width:${H.load}%"></div></div><span class="text-xs font-bold ${H.load>85?'text-warm-700':'text-slate-500'}">OPD ${H.load>85?'busy':'normal'}</span></div>
+            </div>
+          </div></button>`).join('')}</div>`;
+  }
+  if (BK.step===3){
+    h = `<h2 class="text-xl font-extrabold">Choose a care package</h2>
+      <div class="space-y-3 mt-4">${Object.values(PACKAGES).map(P=>`
+        <button class="card-opt ${BK.pkg===P.id?'on':''}" onclick="BK.pkg='${P.id}';renderBook();icons()">
+          <div class="flex items-start gap-3">
+            <div class="w-11 h-11 rounded-xl bg-brand-50 text-brand-700 grid place-items-center shrink-0"><i data-lucide="${P.icon}"></i></div>
+            <div class="flex-1">
+              <div class="flex items-center justify-between gap-2"><p class="font-extrabold">${P.name}</p>${P.tag?`<span class="badge-warn shrink-0">${P.tag}</span>`:''}</div>
+              <p class="text-sm text-slate-600 mt-0.5">${P.desc}</p>
+              <ul class="mt-2 space-y-1">${P.incl.map(x=>`<li class="text-xs text-slate-600 flex items-center gap-1.5"><i data-lucide="check" class="ico-sm text-brand-700"></i>${x}</li>`).join('')}</ul>
+              <p class="mt-2 text-lg font-extrabold text-brand-800">${inr(quote(P.id).total)} <span class="text-xs font-semibold text-slate-500">est.</span></p>
+            </div></div></button>`).join('')}</div>`;
+  }
+  if (BK.step===4){
+    const H = hosp(BK.hospital);
+    const slots = []; for (let m=7*60; m<=17*60; m+=30) slots.push(fmtTime(m));
+    h = `<h2 class="text-xl font-extrabold">Medical needs & patient</h2>
+      <p class="lbl mt-4">Select all that apply</p>
+      <div class="grid gap-2">${NEEDS.map(n=>{ const dis = BK.pkg==='ride' && !n.ride; return `
+        <button class="chip ${BK.needs.has(n.id)&&!dis?'on':''} !justify-start ${dis?'opacity-40 !cursor-not-allowed':''}" ${dis?'disabled':''} onclick="toggleNeed('${n.id}')">
+          <i data-lucide="${n.icon}"></i><span class="flex-1 text-left">${n.name}${n.sub?`<span class="block text-xs text-slate-500 font-medium">${n.sub}</span>`:''}${dis?'<span class="block text-xs text-warm-700 font-medium">Needs Care Companion package</span>':''}</span><span class="text-xs font-bold text-slate-500">+₹${n.price}</span></button>`; }).join('')}</div>
+      ${BK.pkg!=='companion'?`<p class="lbl mt-4">Vehicle</p>
+      <div class="grid grid-cols-2 gap-2">
+        <button class="chip ${BK.vehicle==='sedan'?'on':''}" onclick="BK.vehicle='sedan';renderBook();icons()"><i data-lucide="car"></i>Sedan / MUV</button>
+        <button class="chip ${BK.vehicle==='wav'?'on':''}" onclick="BK.vehicle='wav';renderBook();icons()"><i data-lucide="accessibility"></i>Wheelchair van</button>
+      </div>`:''}
+      <div class="mt-5 space-y-3">
+        <div><label class="lbl" for="pName">Patient name</label><input id="pName" class="inp" autocomplete="name" placeholder="e.g. Padmavathi Reddy" value="${BK.patient.name}"></div>
+        <div class="grid grid-cols-2 gap-3">
+          <div><label class="lbl" for="pAge">Age</label><input id="pAge" class="inp" inputmode="numeric" maxlength="3" placeholder="72" value="${BK.patient.age}"></div>
+          <div><label class="lbl" for="pLang">Language</label><select id="pLang" class="inp">${['Telugu','Hindi','Urdu','English','Tamil','Kannada'].map(l=>`<option ${BK.patient.lang===l?'selected':''}>${l}</option>`).join('')}</select></div>
+        </div>
+        <div><label class="lbl" for="pPhone">Mobile</label><div class="flex"><span class="inp !w-auto !rounded-r-none border-r-0 bg-slate-50 font-bold">+91</span><input id="pPhone" class="inp !rounded-l-none" type="tel" inputmode="numeric" maxlength="10" placeholder="98480 12345" value="${BK.patient.phone}"></div></div>
+        <div><label class="lbl" for="pDept">Department · ${hName(H)}</label><select id="pDept" class="inp"><option value="">Select department</option>${H.depts.map(d=>`<option ${BK.dept===d?'selected':''}>${d}</option>`).join('')}</select></div>
+        <div class="grid grid-cols-2 gap-3">
+          <div><label class="lbl" for="pDate">Date</label><input id="pDate" type="date" class="inp !px-3" value="${BK.date}"></div>
+          <div><label class="lbl" for="pTime">Appointment</label><select id="pTime" class="inp !px-3">${slots.map(s=>`<option ${BK.time===s?'selected':''}>${s}</option>`).join('')}</select></div>
+        </div>
+        <div><label class="lbl" for="pNotes">Notes for attendant</label><textarea id="pNotes" rows="2" class="inp" placeholder="Allergies, fasting, mobility…">${BK.notes}</textarea></div>
+      </div>`;
+  }
+  if (BK.step===5){
+    const A = area(BK.area), H = hosp(BK.hospital), P = PACKAGES[BK.pkg], q = quote();
+    h = `<h2 class="text-xl font-extrabold">Review & confirm</h2>
+      <div class="mt-4 rounded-2xl border border-slate-200 bg-white divide-y divide-slate-100 text-sm">
+        <div class="p-3 flex gap-3"><i data-lucide="map-pin" class="text-brand-700"></i><div><p class="font-bold">${A.name} · ${BK.pin}</p><p class="text-slate-500">${BK.address}</p></div></div>
+        <div class="p-3 flex gap-3"><i data-lucide="hospital" class="text-warm-700"></i><div><p class="font-bold">${H.name}, ${H.branch}</p><p class="text-slate-500">${BK.dept} · ${DOCTORS[BK.dept]||'OPD'} · ${BK.time}${BK.date?', '+new Date(BK.date).toLocaleDateString('en-IN',{day:'numeric',month:'short'}):''}</p><p class="text-slate-500">Drop: ${H.gate}</p></div></div>
+        <div class="p-3 flex gap-3"><i data-lucide="${P.icon}" class="text-brand-700"></i><div><p class="font-bold">${P.name}</p><p class="text-slate-500">${[...BK.needs].map(id=>NEEDS.find(n=>n.id===id)).filter(n=>BK.pkg!=='ride'||n.ride).map(n=>n.name).join(' · ')||'No add-ons'}</p></div></div>
+        <div class="p-3 flex gap-3"><i data-lucide="user" class="text-brand-700"></i><div><p class="font-bold">${BK.patient.name}, ${BK.patient.age}</p><p class="text-slate-500">+91 ${BK.patient.phone} · ${BK.patient.lang}</p></div></div>
+      </div>
+      <div class="mt-4 rounded-2xl bg-white border border-slate-200 p-4 text-sm space-y-1.5">
+        ${q.lines.map(([l,v])=>`<div class="flex justify-between gap-3"><span class="text-slate-600">${l}</span><span class="font-semibold ${v<0?'text-brand-700':''}">${inr(v)}</span></div>`).join('')}
+        <div class="flex justify-between pt-2 mt-2 border-t border-slate-200 text-base"><span class="font-extrabold">Total</span><span class="font-extrabold text-brand-800">${inr(q.total)}</span></div>
+      </div>
+      <p class="lbl mt-4">Pay with</p>
+      <div class="grid grid-cols-2 gap-2">${[['upi','UPI','smartphone'],['card','Card','credit-card'],['later','After visit','wallet'],['corp','Corporate/TPA','briefcase-medical']].map(([id,l,ic])=>`<button class="chip ${BK.pay===id?'on':''}" onclick="BK.pay='${id}';renderBook();icons()"><i data-lucide="${ic}"></i>${l}</button>`).join('')}</div>
+      <label class="flex items-start gap-3 mt-4 rounded-2xl border border-warm-200 bg-warm-50 p-3 cursor-pointer"><input id="ackBox" type="checkbox" class="mt-1 w-5 h-5 accent-teal-700" ${BK.ack?'checked':''}><span class="text-sm text-warm-700"><b>Planned, non-emergency visit.</b> Attendants assist and escort; they don't provide medical treatment.</span></label>`;
+  }
+  screen(`<div class="min-h-full flex flex-col">
+    <div class="px-4 pt-4"><div class="flex items-center gap-1.5">${STEP_NAMES.map((n,i)=>`<div class="flex-1"><div class="h-1.5 rounded-full ${i+1<=BK.step?'bg-brand-700':'bg-slate-200'}"></div><p class="text-[11px] mt-1 font-bold ${i+1===BK.step?'text-brand-700':'text-slate-400'}">${n}</p></div>`).join('')}</div></div>
+    <div id="bkBody" class="flex-1 px-4 py-4">${h}</div>
+    <div class="sticky bottom-0 bg-white/95 backdrop-blur border-t border-slate-200 p-3 flex gap-2">
+      ${BK.step>1?`<button class="btn-ghost !px-4" onclick="BK.step--;render(true)" aria-label="Back"><i data-lucide="chevron-left"></i></button>`:''}
+      <button id="bkNext" class="btn-primary flex-1" onclick="nextStep()">${BK.step<5?'Continue':'Confirm & book · '+inr(quote().total)}<i data-lucide="${BK.step<5?'chevron-right':'check'}"></i></button>
+    </div></div>`);
+  bindBook(); syncFooter();
+}
+/* ---------- Step 1: Uber / Rapido-style pickup map ---------- */
+const LANDMARKS = [
+  ['Jubilee Hills Check Post',17.4300,78.4085],['Peddamma Temple',17.4318,78.4071],['KBR Park Main Gate',17.4239,78.4210],['Film Nagar',17.4155,78.4040],
+  ['Road No. 12, Banjara Hills',17.4128,78.4402],['Banjara Hills Road No. 1',17.4182,78.4495],['City Center Mall',17.4153,78.4437],
+  ['Indira Nagar, Gachibowli',17.4401,78.3489],['Gachibowli Stadium',17.4471,78.3482],['ISB Road',17.4335,78.3418],['Gachibowli Flyover',17.4405,78.3628],
+  ['Cyber Towers',17.4504,78.3810],['Mindspace Junction',17.4415,78.3790],['Inorbit Mall',17.4345,78.3866],['Kavuri Hills',17.4430,78.3940],
+  ['Kondapur Main Road',17.4615,78.3570],['Botanical Garden',17.4579,78.3535],['Kothaguda Junction',17.4640,78.3700],
+  ['Paradise Circle',17.4434,78.4870],['Clock Tower, Secunderabad',17.4391,78.4986],['Secunderabad Railway Station',17.4344,78.5013],
+  ['Somajiguda Circle',17.4252,78.4596],['Raj Bhavan Road',17.4226,78.4639],['Khairatabad Junction',17.4140,78.4610],
+];
+const SAVED = [['house','Home','gachibowli'],['heart','Parents','jubilee'],['briefcase','Office','hitec']];
+const hv = (a,b) => { const r=Math.PI/180, x=Math.sin((b.lat-a.lat)*r/2)**2+Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin((b.lng-a.lng)*r/2)**2; return 12742*Math.asin(Math.sqrt(x)); };
+let PMAP = null, CAR_TIMER = null;
+function destroyPickMap(){ if (PMAP){ PMAP.remove(); PMAP = null; } ROUTE = null; DEST_MK = null; clearInterval(CAR_TIMER); }
+const carSvg = r => `<div style="transform:rotate(${r}deg);filter:drop-shadow(0 2px 3px rgba(0,0,0,.35))"><svg width="16" height="28" viewBox="0 0 16 28"><rect x="1" y="1" width="14" height="26" rx="5" fill="#fff" stroke="#0F172A" stroke-width="1.5"/><rect x="3" y="6" width="10" height="6" rx="2" fill="#0F766E"/><rect x="3" y="18" width="10" height="5" rx="2" fill="#334155"/></svg></div>`;
+
+function loadLeaflet(cb){
+  if (window.L) return cb();
+  // fallback CDN if unpkg is blocked
+  const css = document.createElement('link'); css.rel='stylesheet'; css.href='https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css'; document.head.appendChild(css);
+  const js = document.createElement('script'); js.src='https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js';
+  js.onload = cb; js.onerror = cb; document.head.appendChild(js);
+}
+const PIN_ICON = (color) => `<svg width="18" height="24" viewBox="0 0 18 24"><path d="M9 0a9 9 0 0 0-9 9c0 6.5 9 15 9 15s9-8.5 9-15a9 9 0 0 0-9-9z" fill="${color}"/><rect x="5" y="7" width="8" height="3.2" rx="1.6" fill="#fff"/></svg>`;
+let ROUTE = null, DEST_MK = null;
+
+function renderPickup(){
+  destroyPickMap();
+  const t = S.trip, live = !tripComplete(), H = BK.hospital && hosp(BK.hospital);
+  $('#screen').innerHTML = `
+  <div class="relative h-full min-h-[560px] overflow-hidden bg-[#EEF1F3]">
+    <div id="pickMap" class="absolute inset-0"></div>
+    <div id="mapFallback" class="hidden absolute inset-0 grid place-items-center text-center p-6"><div><i data-lucide="map-off" class="mx-auto !w-10 !h-10 text-slate-400"></i><p class="font-bold mt-2">Map couldn't load</p><p class="text-sm text-slate-500">Check your internet. You can still search or pick a saved place.</p></div></div>
+
+    <!-- Uber-style floating route card -->
+    <div class="absolute top-3 inset-x-3 z-[1001]">
+      <div class="bg-white rounded-xl shadow-[0_6px_24px_rgba(15,23,42,.18)]">
+        <div class="flex items-center gap-3 px-4 min-h-[60px] cursor-text" onclick="openSearch()">
+          ${PIN_ICON('#0F766E')}
+          <div class="flex-1 min-w-0 py-2">
+            <p class="text-[11px] font-bold text-brand-700 uppercase tracking-wider">Pickup</p>
+            <p id="locTitle" class="text-[1.05rem] font-semibold text-slate-900 truncate">Finding your location…</p>
+            <input id="pickSearch" class="hidden w-full text-[1.05rem] font-semibold text-slate-900 outline-none bg-transparent placeholder:text-slate-400" placeholder="Search area, landmark or PIN" autocomplete="off">
+          </div>
+          <span id="locBadge"></span>
+        </div>
+        <div class="h-px bg-slate-200 ml-12"></div>
+        <button class="w-full flex items-center gap-3 px-4 min-h-[60px] text-left" onclick="openHospitalSheet()">
+          ${PIN_ICON('#0F172A')}
+          <div class="flex-1 min-w-0 py-2">
+            <p class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Hospital</p>
+            <p id="destTitle" class="text-[1.05rem] ${H?'font-semibold text-slate-900':'text-slate-500'} truncate">${H?`${H.name}, ${H.branch}`:'Which hospital?'}</p>
+          </div>
+          <span id="destMeta" class="text-xs font-bold text-slate-500 shrink-0"></span>
+        </button>
+      </div>
+      <div id="pickSugg" class="hidden mt-2 bg-white rounded-xl shadow-2xl overflow-hidden max-h-[50vh] overflow-y-auto"></div>
+      ${live ? `<button onclick="go(null,'track')" class="mt-2 rounded-full bg-brand-700 text-white shadow-lg pl-3 pr-2 py-1.5 text-xs font-bold inline-flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-warm-500 pulse-amber"></span>Visit in progress · ${t.b.patient.name.split(' ')[0]}<i data-lucide="chevron-right" class="ico-sm"></i></button>` : ''}
+    </div>
+
+    <!-- centre pin -->
+    <div id="pinWrap" class="absolute left-1/2 top-1/2 z-[1000] pointer-events-none flex flex-col items-center">
+      <div id="pinBubble" class="mb-1.5 rounded-full bg-slate-900 text-white text-xs font-bold px-3 py-1.5 shadow-lg whitespace-nowrap">Locating…</div>
+      <svg width="34" height="46" viewBox="0 0 34 46"><path id="pinBody" d="M17 0C7.6 0 0 7.6 0 17c0 12.5 17 29 17 29s17-16.5 17-29C34 7.6 26.4 0 17 0z" fill="#0F766E"/><rect x="9.5" y="13.5" width="15" height="6" rx="3" fill="#fff"/></svg>
+    </div>
+    <div id="pinShadow" class="absolute left-1/2 top-1/2 z-[999] w-3 h-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-slate-900/40"></div>
+
+    <!-- bottom panel -->
+    <div class="absolute bottom-0 inset-x-0 z-[1001]">
+      <div class="flex justify-end px-3 mb-3"><button onclick="locateMe()" class="w-12 h-12 rounded-full bg-white shadow-lg grid place-items-center text-slate-800" aria-label="Use my location"><i data-lucide="locate-fixed"></i></button></div>
+      <div class="bg-white rounded-t-3xl shadow-[0_-8px_28px_rgba(15,23,42,.14)] pt-4 pb-3">
+        <div class="flex gap-2 overflow-x-auto no-scrollbar px-4">
+          ${SAVED.map(([ic,l,a])=>`<button class="chip !py-2 shrink-0" onclick="flyToArea('${a}')"><i data-lucide="${ic}" class="ico-sm text-brand-700"></i><span class="text-left leading-tight">${l}<span class="block text-[11px] text-slate-500 font-medium">${area(a).name}</span></span></button>`).join('')}
+          ${AREAS.filter(a=>!SAVED.some(x=>x[2]===a.id)).map(a=>`<button class="chip !py-2 shrink-0" onclick="flyToArea('${a.id}')">${a.name}</button>`).join('')}
+        </div>
+        <div class="px-4 mt-3"><button id="bkNext" class="btn-primary w-full" onclick="nextStep()" disabled>Confirm pickup<i data-lucide="arrow-right"></i></button>
+        <p class="text-[11px] text-slate-500 text-center mt-2">Planned visits only · Emergency? Call <a href="tel:108" class="font-bold text-warm-700">108</a></p></div>
+      </div>
+    </div>
+  </div>`;
+  icons();
+  bindPickSearch();
+  loadLeaflet(initPickMap);
+}
+function initPickMap(){
+  if (!$('#pickMap')) return;
+  if (!window.L){ $('#mapFallback').classList.remove('hidden'); $('#pinWrap').classList.add('hidden'); $('#pinShadow').classList.add('hidden'); if (BK.area) setPickup(area(BK.area)); return; }
+  const A = BK.area && area(BK.area);
+  const start = BK.lat ? [BK.lat, BK.lng] : A ? [A.lat, A.lng] : [17.4401, 78.3489];
+  PMAP = L.map('pickMap', {zoomControl:false, maxZoom:16}).setView(start, 15);
+  // Keyless light-grey basemap (Uber-like). Labels come from a separate reference layer.
+  const esri = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/';
+  L.tileLayer(esri+'World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', {maxZoom:16, maxNativeZoom:16, attribution:'Tiles © Esri — Esri, HERE, OpenStreetMap contributors'}).addTo(PMAP);
+  L.tileLayer(esri+'World_Light_Gray_Reference/MapServer/tile/{z}/{y}/{x}', {maxZoom:16, maxNativeZoom:16}).addTo(PMAP);
+  PMAP.attributionControl.setPrefix(false);
+  try { AREAS.forEach(a => L.circle([a.lat,a.lng], {radius:3000, color:'#0F766E', weight:1, opacity:.3, dashArray:'4 6', fillColor:'#14B8A6', fillOpacity:.05, interactive:false}).addTo(PMAP)); } catch(e){}
+  HOSPITALS.forEach(h => L.marker([h.lat,h.lng], {icon:L.divIcon({className:'', iconSize:[28,28], iconAnchor:[14,14], html:`<div style="position:relative"><div class="hosp-mk">+</div><span class="hosp-lbl">${hName(h)}</span></div>`})}).on('click', () => pickHospital(h.id)).addTo(PMAP));
+  const cars = [];
+  AREAS.forEach((a,i) => { for (let j=0;j<3;j++){ const r = Math.sin(i*7+j*3); cars.push(L.marker([a.lat + r*.007, a.lng + Math.cos(i*5+j)*.008], {interactive:false, icon:L.divIcon({className:'', iconSize:[16,28], iconAnchor:[8,14], html:carSvg(Math.round(r*180))})}).addTo(PMAP)); } });
+  CAR_TIMER = setInterval(() => cars.forEach(m => { const p = m.getLatLng(); m.setLatLng([p.lat+(Math.random()-.5)*.0009, p.lng+(Math.random()-.5)*.0009]); }), 2200);
+  PMAP.on('movestart', () => { $('#pinWrap').classList.add('lift'); $('#pinBubble').textContent = 'Locating…'; $('#pinBubble').className = 'mb-1.5 rounded-full bg-slate-900 text-white text-xs font-bold px-3 py-1.5 shadow-lg whitespace-nowrap'; });
+  PMAP.on('moveend', () => { $('#pinWrap').classList.remove('lift'); readCenter(); });
+  setTimeout(() => { if (PMAP){ PMAP.invalidateSize(); readCenter(); } }, 60);
+}
+function drawRoute(){
+  if (!PMAP || !window.L) return;
+  if (ROUTE){ PMAP.removeLayer(ROUTE); ROUTE = null; }
+  if (DEST_MK){ PMAP.removeLayer(DEST_MK); DEST_MK = null; }
+  const H = BK.hospital && hosp(BK.hospital); if (!H || !BK.area) return;
+  const a = PMAP.getCenter(), b = L.latLng(H.lat, H.lng), pts = [];
+  // gentle curve between pickup and hospital
+  const mx = (a.lat+b.lat)/2 + (b.lng-a.lng)*.18, my = (a.lng+b.lng)/2 - (b.lat-a.lat)*.18;
+  for (let i=0;i<=24;i++){ const t=i/24, u=1-t; pts.push([u*u*a.lat+2*u*t*mx+t*t*b.lat, u*u*a.lng+2*u*t*my+t*t*b.lng]); }
+  try { ROUTE = L.polyline(pts, {color:'#0F172A', weight:4, opacity:.85, interactive:false}).addTo(PMAP); } catch(e){}
+  DEST_MK = L.marker(b, {interactive:false, zIndexOffset:1000, icon:L.divIcon({className:'', iconSize:[30,40], iconAnchor:[15,40], html:`<svg width="30" height="40" viewBox="0 0 18 24">${PIN_ICON('#0F172A').replace(/<\/?svg[^>]*>/g,'')}</svg>`})}).addTo(PMAP);
+}
+function readCenter(){
+  if (!PMAP) return;
+  const c = PMAP.getCenter(); BK.lat = c.lat; BK.lng = c.lng;
+  let best = null, bd = 1e9; AREAS.forEach(a => { const d = hv(a, c); if (d < bd){ bd = d; best = a; } });
+  if (bd <= 3){
+    let lm = null, ld = 1e9; LANDMARKS.forEach(([n,lat,lng]) => { const d = hv({lat,lng}, c); if (d < ld){ ld = d; lm = n; } });
+    setPickup(best, lm, Math.max(2, Math.round(2 + bd*2.2)));
+  } else {
+    BK.area = null; BK.address = '';
+    $('#locTitle').textContent = `Not serviceable here (${bd.toFixed(1)} km from ${best.name})`;
+    $('#locTitle').className = 'text-[1.05rem] font-semibold text-warm-700 truncate';
+    $('#pinBubble').textContent = 'Outside service area';
+    $('#pinBubble').className = 'mb-1.5 rounded-full bg-warm-600 text-white text-xs font-bold px-3 py-1.5 shadow-lg whitespace-nowrap';
+    $('#pinBody').setAttribute('fill', '#D97706');
+    $('#destMeta').textContent = '';
+    drawRoute(); syncFooter();
+  }
+}
+function setPickup(a, lm, eta){
+  BK.area = a.id; BK.pin = a.pins[0]; BK.landmark = lm || a.name;
+  BK.address = lm ? `Near ${lm}, ${a.name}, Hyderabad ${a.pins[0]}` : a.addr;
+  const t = $('#locTitle'); if (!t) return;
+  t.textContent = lm ? (lm.includes(a.name) ? lm : `${lm}, ${a.name}`) : a.name; t.className = 'text-[1.05rem] font-semibold text-slate-900 truncate';
+  $('#pinBubble').textContent = eta ? `Pickup here · driver ${eta} min` : 'Pickup here';
+  $('#pinBubble').className = 'mb-1.5 rounded-full bg-slate-900 text-white text-xs font-bold px-3 py-1.5 shadow-lg whitespace-nowrap';
+  $('#pinBody').setAttribute('fill', '#0F766E');
+  const H = BK.hospital && hosp(BK.hospital);
+  if (H){ const d = km(a.lat && BK.lat ? {lat:BK.lat,lng:BK.lng} : a, H); $('#destMeta').textContent = `${d.toFixed(1)} km · ${etaMin(d)} min`; }
+  drawRoute(); syncFooter();
+}
+function pickHospital(id){
+  BK.hospital = id; BK.dept = ''; closeSheet();
+  const H = hosp(id);
+  $('#destTitle').textContent = `${H.name}, ${H.branch}`; $('#destTitle').className = 'text-[1.05rem] font-semibold text-slate-900 truncate';
+  if (BK.area){ const d = km({lat:BK.lat||area(BK.area).lat, lng:BK.lng||area(BK.area).lng}, H); $('#destMeta').textContent = `${d.toFixed(1)} km · ${etaMin(d)} min`; }
+  drawRoute();
+  if (PMAP && BK.area){ try {   // zoom out around the pickup pin (pin stays put) so the hospital is visible
+    const c = PMAP.getCenter(), mirror = [2*c.lat-H.lat, 2*c.lng-H.lng];
+    const z = Math.min(16, PMAP.getBoundsZoom(L.latLngBounds([[H.lat,H.lng], mirror]).pad(0.35)));
+    if (z < PMAP.getZoom()) PMAP.setView(c, z, {animate:true});
+  } catch(e){} }
+}
+function openHospitalSheet(){
+  const from = BK.lat ? {lat:BK.lat, lng:BK.lng} : area('gachibowli');
+  const list = HOSPITALS.map(H=>({H, d:km(from,H)})).sort((x,y)=>x.d-y.d);
+  openSheet(`<h3 class="text-xl font-extrabold pr-10">Which hospital?</h3><p class="text-sm text-slate-500 mb-3">Partner hospitals · nearest first</p>
+    <div class="divide-y divide-slate-100">${list.map(({H,d},i)=>`
+      <button class="w-full text-left flex items-center gap-3 py-3.5" onclick="pickHospital('${H.id}')">
+        <span class="w-11 h-11 rounded-xl ${BK.hospital===H.id?'bg-slate-900 text-white':'bg-warm-50 text-warm-700'} grid place-items-center shrink-0"><i data-lucide="hospital"></i></span>
+        <span class="flex-1 min-w-0"><b class="block">${H.name}, ${H.branch}</b><span class="text-sm text-slate-500 block truncate">${d.toFixed(1)} km · ~${etaMin(d)} min · OPD ${H.load>85?'busy':'normal'}</span></span>
+        ${i===0?'<span class="badge-ok shrink-0">Nearest</span>':''}${BK.hospital===H.id?'<i data-lucide="check" class="text-brand-700"></i>':''}
+      </button>`).join('')}</div>`);
+}
+function openSearch(){
+  const t = $('#locTitle'), inp = $('#pickSearch');
+  t.classList.add('hidden'); inp.classList.remove('hidden'); inp.value = ''; inp.focus();
+}
+function closeSearch(){
+  const t = $('#locTitle'), inp = $('#pickSearch'); if (!inp) return;
+  inp.classList.add('hidden'); t.classList.remove('hidden'); $('#pickSugg').classList.add('hidden');
+}
+function flyToArea(id, ll){
+  const a = area(id); closeSearch();
+  if (PMAP) PMAP.flyTo(ll || [a.lat, a.lng], 15, {duration:.8}); else setPickup(a);
+}
+function locateMe(){
+  const fallback = msg => { toast(msg, 'info'); flyToArea('hitec'); };
+  if (!navigator.geolocation) return fallback('Location detected: HITEC City (demo)');
+  navigator.geolocation.getCurrentPosition(p => {
+    const here = {lat:p.coords.latitude, lng:p.coords.longitude};
+    if (hv(here, {lat:17.43, lng:78.43}) < 30 && PMAP) PMAP.flyTo([here.lat, here.lng], 16, {duration:.8});
+    else fallback('You seem to be outside Hyderabad — showing HITEC City for the demo');
+  }, () => fallback('Location detected: HITEC City (demo)'), {timeout:5000, maximumAge:60000});
+}
+function bindPickSearch(){
+  const inp = $('#pickSearch'), box = $('#pickSugg');
+  inp.addEventListener('input', () => {
+    const q = inp.value.trim().toLowerCase();
+    if (!q){ box.classList.add('hidden'); return; }
+    const items = [];
+    AREAS.filter(a => a.name.toLowerCase().includes(q) || a.pins.some(p=>p.startsWith(q))).forEach(a => items.push(['map-pin', a.name, `Hyderabad ${a.pins.join(', ')}`, `flyToArea('${a.id}')`]));
+    LANDMARKS.filter(l => l[0].toLowerCase().includes(q)).slice(0,4).forEach(l => { const best = AREAS.reduce((m,x)=>hv(x,{lat:l[1],lng:l[2]})<hv(m,{lat:l[1],lng:l[2]})?x:m); items.push(['navigation', l[0], best.name, `flyToArea('${best.id}',[${l[1]},${l[2]}])`]); });
+    if (!items.length) box.innerHTML = `<div class="p-4 text-sm text-warm-700 font-bold flex gap-2"><i data-lucide="triangle-alert" class="ico-sm mt-0.5"></i>${/^\d{6}$/.test(q)?`PIN ${q} isn't served yet.`:'No match.'} We serve Jubilee Hills, Banjara Hills, Gachibowli, HITEC City, Kondapur, Secunderabad &amp; Somajiguda.</div>`;
+    else box.innerHTML = items.slice(0,7).map(([ic,t,sub,fn]) => `<button class="w-full text-left flex items-center gap-3 px-4 py-3 hover:bg-slate-50 border-b border-slate-100 last:border-0" onmousedown="event.preventDefault()" onclick="${fn}"><span class="w-9 h-9 rounded-full bg-slate-100 text-slate-600 grid place-items-center shrink-0"><i data-lucide="${ic}" class="ico-sm"></i></span><span class="min-w-0"><b class="block text-sm truncate">${t}</b><span class="block text-xs text-slate-500 truncate">${sub}</span></span></button>`).join('');
+    box.classList.remove('hidden'); icons();
+  });
+  inp.addEventListener('blur', () => setTimeout(closeSearch, 150));
+  inp.addEventListener('keydown', e => { if (e.key==='Escape') inp.blur(); if (e.key==='Enter'){ const f = box.querySelector('button'); if (f) f.click(); } });
+}
+function bindBook(){
+  const pin = $('#pinInput');
+  if (pin){
+    pin.addEventListener('input', ()=>{ pin.value = pin.value.replace(/\D/g,''); BK.pin = pin.value; checkPin(false); syncFooter(); });
+    if (BK.pin.length===6) checkPin(true);
+  }
+  const bind = (id, fn) => { const e = $('#'+id); if (e) e.addEventListener('input', ()=>{ fn(e); syncFooter(); }); };
+  bind('addrInput', e=>BK.address=e.value);
+  bind('pName', e=>BK.patient.name=e.value);
+  bind('pAge',  e=>{ e.value=e.value.replace(/\D/g,''); BK.patient.age=e.value; });
+  bind('pPhone',e=>{ e.value=e.value.replace(/\D/g,''); BK.patient.phone=e.value; });
+  bind('pNotes',e=>BK.notes=e.value);
+  [['pLang',v=>BK.patient.lang=v],['pDept',v=>BK.dept=v],['pTime',v=>BK.time=v],['pDate',v=>BK.date=v]].forEach(([id,fn])=>{ const e=$('#'+id); if(e) e.addEventListener('change', ()=>{ fn(e.value); syncFooter(); }); });
+  const ack = $('#ackBox'); if (ack) ack.addEventListener('change', ()=>{ BK.ack = ack.checked; syncFooter(); });
+}
+function checkPin(quiet){
+  const msg = $('#pinMsg'); if (!msg) return;
+  if (BK.pin.length < 6){ msg.innerHTML = ''; return; }
+  const A = AREAS.find(a=>a.pins.includes(BK.pin));
+  if (A){
+    msg.innerHTML = `<span class="text-brand-700 font-bold inline-flex items-center gap-1"><i data-lucide="circle-check" class="ico-sm"></i>Serviceable — ${A.name}, Hyderabad</span>`;
+    if (BK.area !== A.id){ BK.area = A.id; if (!BK.address) BK.address = A.addr; BK.hospital=null; if (!quiet){ render(); return; } }
+  } else {
+    BK.area = null;
+    msg.innerHTML = `<span class="text-warm-700 font-bold inline-flex items-start gap-1"><i data-lucide="triangle-alert" class="ico-sm mt-0.5"></i>${BK.pin} isn't served yet. Try 500033, 500034, 500081, 500032, 500084, 500003 or 500082.</span>`;
+    $$('#bkBody .chip').forEach(c=>c.classList.remove('on'));
+  }
+  icons();
+}
+function pickArea(id){ const A=area(id); BK.area=id; BK.pin=A.pins[0]; BK.address=A.addr; BK.hospital=null; render(); }
+function toggleNeed(id){
+  BK.needs.has(id) ? BK.needs.delete(id) : BK.needs.add(id);
+  if (id==='wheelchair' && BK.needs.has('wheelchair') && BK.pkg!=='companion'){ BK.vehicle='wav'; toast('Wheelchair van selected automatically','info'); }
+  render();
+}
+function nextStep(){
+  if (!bookingValid()) return;
+  if (BK.step===3 && !BK.date){ const t=new Date(); t.setDate(t.getDate()+1); BK.date=t.toISOString().slice(0,10); }
+  if (BK.step===1 && BK.hospital){ BK.step = 3; render(true); return; }
+  if (BK.step<5){ BK.step++; render(true); return; }
+  const b = {
+    id:'ASH-HYD-'+(24818+Math.floor(Math.random()*900)), area:BK.area, pin:BK.pin, address:(BK.flat.trim()?BK.flat.trim()+', ':'')+BK.address, hospital:BK.hospital, pkg:BK.pkg,
+    needs:[...BK.needs].filter(id=>BK.pkg!=='ride'||NEEDS.find(n=>n.id===id).ride), vehicle:BK.vehicle,
+    patient:{...BK.patient, gender:''}, dept:BK.dept, doctor:DOCTORS[BK.dept]||'OPD doctor',
+    date: BK.date ? new Date(BK.date).toLocaleDateString('en-IN',{day:'numeric',month:'short'}) : 'Tomorrow', time:BK.time, notes:BK.notes, booker:'Karthik Chilukuri', total:Math.round(quote().total)
+  };
+  S.trip = newTrip(b, b.pkg==='companion'?1:2); S.trip.lastTick = Date.now(); AUTO = true; S.stats.active++; CAR_T = null;
+  logEvent(`New booking <b>${b.id}</b> · ${area(b.area).name} → ${hName(hosp(b.hospital))}`, 'calendar-plus', 'teal', false);
+  emit();
+  BK = BK_DEFAULT();
+  toast(`Booked! ${b.id} · pickup OTP ${DEMO_OTP} sent on WhatsApp`);
+  go(null,'track');
+}
+
+/* =========================================================
+   PATIENT — Track
+   ========================================================= */
+/* Auto-advance the live trip every 5 s (no clicking needed).
+   lastTick in the shared store stops two open tabs from double-advancing. */
+setInterval(()=>{
+  if (!AUTO || tripComplete()) return;
+  if (Date.now() - (S.trip.lastTick||0) < TICK_MS - 400) return;
+  S.trip.lastTick = Date.now();
+  advanceTrip('auto');
+}, TICK_MS);
+function toggleAuto(){ AUTO = !AUTO; toast(AUTO ? 'Live updates resumed' : 'Live updates paused', 'info'); render(); }
+function resetTrip(){ CAR_T = null; S.trip = newTrip(DEMO_BOOKING, 4); S.trip.lastTick = Date.now(); AUTO = true; emit(); toast('Demo trip restarted','info'); }
+function carPos(){ let p=0; const ms=tripMs(); for (let i=0;i<S.trip.done;i++){ if (ms[i].pos!==null) p=ms[i].pos; } return p; }
+function placeCar(){
+  const path = $('#routePath'), car = $('#carDot'); if (!path || !car || !path.getTotalLength) return;
+  const to = carPos(), from = CAR_T===null ? to : CAR_T, L = path.getTotalLength(), t0 = performance.now();
+  const put = t => { const p = path.getPointAtLength(Math.max(0,Math.min(1,t))*L); car.setAttribute('transform',`translate(${p.x},${p.y})`); };
+  CAR_T = to;
+  if (from===to){ put(to); return; }
+  const step = now => { const k=Math.min(1,(now-t0)/900), e=k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2; put(from+(to-from)*e); if(k<1) requestAnimationFrame(step); };
+  requestAnimationFrame(step);
+}
+const OWNER_CHIP = {driver:'<span class="badge-slate">Driver</span>', attendant:'<span class="badge-warn">Attendant</span>', system:'<span class="badge-ok">System</span>'};
+
+function renderTrack(){
+  const {b, done, times} = S.trip, ms = tripMs(), H = hosp(b.hospital), A = area(b.area), P = PACKAGES[b.pkg];
+  const complete = done >= ms.length, cur = ms[Math.min(done, ms.length-1)], last = ms[done-1];
+  const pct = Math.round(done/ms.length*100);
+  const inside = last && ['handover','registration','lab','consult','scan','discharge','pharmacy','reports'].includes(last.key);
+  const hasRide = b.pkg!=='companion', hasComp = b.pkg!=='ride';
+  const rem = ms.slice(done).reduce((s,m)=>s+m.dur,0);
+  screen(`
+  <div class="bg-brand-700 text-white px-4 pt-4 pb-5">
+    <div class="flex items-center justify-between gap-2 text-xs">
+      <span class="flex items-center gap-2 font-bold uppercase tracking-wider text-brand-100"><span class="w-2.5 h-2.5 rounded-full ${complete?'bg-white':'bg-warm-500 pulse-amber'}"></span>${complete?'Completed':'Live tracking'}</span>
+      <span class="font-semibold bg-white/15 rounded-full px-2.5 py-1">${b.id}</span>
+    </div>
+    <h1 class="text-[1.4rem] font-extrabold mt-3 leading-tight">${complete?'Reached home safely 🎉':(last?last.title:'Booking confirmed')}</h1>
+    <p class="text-brand-100 text-sm mt-1">${complete?'Reports & prescriptions saved in the family vault.':(last?last.detail:'')}</p>
+    <div class="mt-4"><div class="flex justify-between text-xs font-semibold mb-1.5"><span class="truncate pr-2">${complete?'All milestones done':'Next: '+cur.title}</span><span>${pct}%</span></div>
+      <div class="h-2.5 rounded-full bg-white/20 overflow-hidden"><div class="h-full rounded-full bg-white transition-all duration-700" style="width:${pct}%"></div></div></div>
+    <div class="grid grid-cols-3 gap-2 mt-4 text-center text-sm">
+      <div class="rounded-xl bg-white/10 p-2"><p class="text-[11px] text-brand-100">Patient</p><p class="font-bold truncate">${b.patient.name.split(' ')[0]}, ${b.patient.age}</p></div>
+      <div class="rounded-xl bg-white/10 p-2"><p class="text-[11px] text-brand-100">Updated</p><p class="font-bold">${last?fmtTime(times[done-1]):'—'}</p></div>
+      <div class="rounded-xl bg-white/10 p-2"><p class="text-[11px] text-brand-100">${complete?'Package':'Remaining'}</p><p class="font-bold truncate">${complete?P.short:'~'+(rem>=60?Math.floor(rem/60)+'h '+(rem%60)+'m':rem+' min')}</p></div>
+    </div>
+  </div>
+
+  <div class="px-4 -mt-3 space-y-4 pb-6">
+    <div class="panel !p-0 overflow-hidden">
+      <svg viewBox="0 0 600 250" class="w-full h-auto block bg-slate-50" aria-label="Route map">
+        <path class="road" d="M0,60 L600,40"/><path class="road" d="M0,205 L600,220"/><path class="road" d="M150,0 L180,250"/><path class="road" d="M420,0 L450,250"/>
+        <ellipse cx="300" cy="155" rx="55" ry="26" fill="#DBEAFE"/>
+        <path id="routePath" d="M70,185 C170,190 210,90 300,105 S430,70 530,60" fill="none" stroke="#99F6E4" stroke-width="14" stroke-linecap="round"/>
+        <path d="M70,185 C170,190 210,90 300,105 S430,70 530,60" fill="none" stroke="#0F766E" stroke-width="4" stroke-dasharray="2 10" stroke-linecap="round"/>
+        <g transform="translate(70,185)"><circle r="18" fill="#0F766E"/><text y="6" text-anchor="middle" font-size="16" fill="#fff" font-weight="700">⌂</text></g>
+        <text x="70" y="232" text-anchor="middle" font-size="18" font-weight="700" fill="#334155">${A.name}</text>
+        <g transform="translate(530,60)"><rect x="-19" y="-19" width="38" height="38" rx="10" fill="#D97706"/><text y="7" text-anchor="middle" font-size="22" fill="#fff" font-weight="800">+</text></g>
+        <text x="530" y="108" text-anchor="middle" font-size="18" font-weight="700" fill="#334155">${hName(H)}</text>
+        ${hasRide?`<g id="carDot"><circle r="17" fill="#fff" stroke="#0F766E" stroke-width="5"/><circle r="7" fill="#0F766E"/></g>`:''}
+      </svg>
+      <div class="px-4 py-3 text-sm flex items-center justify-between border-t border-slate-100"><span class="font-semibold text-slate-600">${km(A,H).toFixed(1)} km · ~${etaMin(km(A,H))} min</span><span class="badge-slate">${P.short}</span></div>
+      ${inside?`<div class="mx-4 mb-4 rounded-2xl bg-warm-50 border border-warm-200 p-3 flex items-center gap-3"><i data-lucide="building-2" class="text-warm-700"></i><div class="text-sm"><p class="font-bold text-warm-700">Inside ${H.name}</p><p class="text-slate-700">${last.detail}</p></div></div>`:''}
+    </div>
+
+    ${hasRide?`<div class="panel flex items-center gap-3">
+      <div class="w-12 h-12 rounded-xl bg-slate-800 text-white grid place-items-center font-bold shrink-0">SG</div>
+      <div class="flex-1 min-w-0"><p class="font-bold">${DRIVER.name} <span class="text-xs text-slate-500">★ ${DRIVER.rating}</span></p><p class="plate text-sm font-extrabold">${DRIVER.plate}</p><p class="text-xs text-brand-700 font-bold">Police verified</p></div>
+      <button class="w-12 h-12 rounded-full bg-brand-50 text-brand-700 grid place-items-center" onclick="toast('Masked call to Srinivas…','info')" aria-label="Call driver"><i data-lucide="phone"></i></button></div>`:''}
+    ${hasComp?`<div class="panel flex items-center gap-3">
+      <div class="w-12 h-12 rounded-xl bg-brand-700 text-white grid place-items-center font-bold shrink-0">RR</div>
+      <div class="flex-1 min-w-0"><p class="font-bold">${ATTENDANT.name}</p><p class="text-xs text-slate-500">${ATTENDANT.role} · ${ATTENDANT.college}</p></div>
+      <button class="w-12 h-12 rounded-full bg-brand-50 text-brand-700 grid place-items-center" onclick="toast('Video check-in requested from Rahul','info')" aria-label="Video call attendant"><i data-lucide="video"></i></button></div>`:''}
+    <button class="btn-ghost w-full" onclick="toast('Live link shared on WhatsApp with 2 family members')"><i data-lucide="share-2"></i>Share live link with family</button>
+
+    <div class="panel">
+      <div class="flex items-center justify-between mb-4"><h2 class="h2">Journey</h2><span class="text-sm text-slate-500">${done}/${ms.length}</span></div>
+      <ol>${ms.map((m,i)=>{ const st = i<done?'done':i===done?'cur':'todo'; return `
+        <li class="flex gap-3 pb-4 last:pb-0 relative">
+          ${i<ms.length-1?`<span class="absolute left-[1.15rem] top-10 bottom-0 w-0.5 ${i<done?'bg-brand-600':'bg-slate-200'}"></span>`:''}
+          <span class="relative z-10 w-10 h-10 shrink-0 rounded-full grid place-items-center ${st==='done'?'bg-brand-700 text-white':st==='cur'?'bg-warm-50 text-warm-700 border-2 border-warm-600 pulse-amber':'bg-slate-100 text-slate-400'}"><i data-lucide="${st==='done'?'check':m.icon}" class="ico-sm"></i></span>
+          <div class="flex-1 min-w-0 pt-0.5">
+            <div class="flex items-start justify-between gap-2"><p class="font-bold leading-snug ${st==='todo'?'text-slate-400':'text-slate-900'}">${m.title}</p>${st==='done'?`<span class="text-xs font-bold text-slate-500 shrink-0 pt-0.5">${fmtTime(times[i])}</span>`:''}</div>
+            <p class="text-sm ${st==='todo'?'text-slate-400':'text-slate-600'}">${m.detail}</p>
+            ${st==='cur'?`<div class="mt-1 flex gap-1.5"><span class="badge-warn">In progress</span>${OWNER_CHIP[m.owner]}</div>`:''}
+          </div></li>`; }).join('')}</ol>
+    </div>
+
+    <div class="rounded-3xl border border-dashed border-slate-300 p-4">
+      <p class="text-sm font-bold flex items-center gap-2 mb-3">${complete?'<i data-lucide="circle-check" class="text-brand-700"></i>Trip finished':AUTO?'<span class="w-2.5 h-2.5 rounded-full bg-brand-600 pulse-teal"></span>Live · auto-updates every 5 seconds':'<i data-lucide="pause" class="ico-sm text-warm-700"></i>Live updates paused'}</p>
+      <div class="grid grid-cols-2 gap-2">
+        <button class="btn-ghost" onclick="toggleAuto()" ${complete?'disabled':''}><i data-lucide="${AUTO?'pause':'play'}"></i>${AUTO?'Pause':'Resume'}</button>
+        <button class="btn-ghost" onclick="resetTrip()"><i data-lucide="rotate-ccw"></i>Restart demo</button>
+      </div>
+      <p class="text-xs text-slate-500 mt-2">Tip: open <a href="admin.html" target="_blank" class="font-bold text-brand-700 underline">admin.html</a> in another tab to watch updates arrive live.</p>
+    </div>
+  </div>`);
+}
+
+/* PATIENT — Visits & Account */
+function renderVisits(){
+  const t = S.trip, H = hosp(t.b.hospital), complete = tripComplete();
+  const past = [
+    ['12 Oct','Yashoda Somajiguda','Cardiology review · Full Concierge','Lakshmi C.'],
+    ['28 Sep','AIG Gachibowli','Endoscopy · Care Companion','Venkateswara Rao C.'],
+    ['02 Sep','Apollo Jubilee Hills','MRI knee · Pickup & Drop','Lakshmi C.'],
+  ];
+  screen(sectionTitle('Visits','Your family\'s hospital visits') + `<div class="px-4 space-y-3 pb-6">
+    <button onclick="go(null,'track')" class="w-full text-left panel flex items-center gap-3 ${complete?'':'!border-brand-600 ring-4 ring-brand-100'}">
+      <span class="w-12 h-12 rounded-xl ${complete?'bg-slate-100 text-slate-600':'bg-brand-700 text-white'} grid place-items-center"><i data-lucide="${complete?'circle-check':'radar'}"></i></span>
+      <span class="flex-1 min-w-0"><b class="block">${hName(H)}</b><span class="text-sm text-slate-500 block truncate">${t.b.dept} · ${PACKAGES[t.b.pkg].short} · ${t.b.patient.name.split(' ')[0]}</span></span>
+      <span class="${complete?'badge-ok':'badge-warn'}">${complete?'Done':'Live'}</span></button>
+    <p class="text-xs font-bold text-slate-500 uppercase tracking-wider pt-2">Earlier</p>
+    ${past.map(([d,h,s,p])=>`<div class="panel flex items-center gap-3"><div class="w-12 text-center shrink-0"><p class="text-lg font-extrabold leading-none">${d.split(' ')[0]}</p><p class="text-xs text-slate-500">${d.split(' ')[1]}</p></div>
+      <div class="flex-1 min-w-0"><p class="font-bold">${h}</p><p class="text-sm text-slate-500 truncate">${s}</p><p class="text-xs text-slate-400">${p}</p></div>
+      <button class="w-11 h-11 rounded-full hover:bg-slate-100 grid place-items-center text-brand-700" onclick="toast('Reports opened (demo)','info')" aria-label="Reports"><i data-lucide="file-text"></i></button></div>`).join('')}
+  </div>`);
+}
+function settingsRow(icon, title, sub, right){ return `<div class="flex items-center gap-3 py-3"><span class="w-10 h-10 rounded-xl bg-slate-100 text-slate-600 grid place-items-center shrink-0"><i data-lucide="${icon}"></i></span><div class="flex-1 min-w-0"><p class="font-bold">${title}</p>${sub?`<p class="text-sm text-slate-500">${sub}</p>`:''}</div>${right}</div>`; }
+const bigSwitch = () => `<button class="switch" role="switch" aria-checked="${document.documentElement.classList.contains('big')}" onclick="this.setAttribute('aria-checked', toggleBigText())"></button>`;
+function commonLinks(){
+  return `<div class="panel divide-y divide-slate-100 !py-1">
+    ${settingsRow('type','Large text','Easier reading for elders', bigSwitch())}
+    <a href="register.html">${settingsRow('user-plus','Become a care partner','Register as attendant or driver','<i data-lucide="chevron-right" class="text-slate-400"></i>')}</a>
+    <a href="admin.html">${settingsRow('layout-dashboard','Ops Command Center','Admin dashboard (staff)','<i data-lucide="chevron-right" class="text-slate-400"></i>')}</a>
+    <button class="w-full text-left" onclick="resetDemo()">${settingsRow('rotate-ccw','Reset demo data','Restores the sample trip & queue','')}</button>
+  </div>`;
+}
+function renderPatientMe(){
+  screen(sectionTitle('Account') + `<div class="px-4 space-y-4 pb-6">
+    <div class="panel flex items-center gap-4"><div class="w-16 h-16 rounded-2xl bg-brand-100 text-brand-800 grid place-items-center text-xl font-extrabold">KC</div><div><p class="font-extrabold text-lg">Karthik Chilukuri</p><p class="text-sm text-slate-500">+91 99490 •••18 · HITEC City</p></div></div>
+    <div class="panel"><h2 class="h2 mb-2">Family members</h2>
+      ${[['VR','Venkateswara Rao','Father · 68 · Telugu'],['LC','Lakshmi Chilukuri','Mother · 63 · Telugu']].map(([i,n,s])=>`<div class="flex items-center gap-3 py-2.5"><span class="w-11 h-11 rounded-xl bg-warm-50 text-warm-700 grid place-items-center font-bold">${i}</span><div class="flex-1"><p class="font-bold">${n}</p><p class="text-sm text-slate-500">${s}</p></div><i data-lucide="chevron-right" class="text-slate-400"></i></div>`).join('')}
+      <button class="btn-ghost w-full mt-2" onclick="toast('Add family member (demo)','info')"><i data-lucide="plus"></i>Add member</button></div>
+    <div class="panel !py-1">${settingsRow('message-circle','WhatsApp updates','After every milestone','<button class="switch" role="switch" aria-checked="true" onclick="this.setAttribute(\'aria-checked\', this.getAttribute(\'aria-checked\')!==\'true\')"></button>')}
+      ${settingsRow('languages','App language','', '<select class="inp !w-auto !py-2" onchange="toast(\'Language set: \'+this.value,\'info\')"><option>English</option><option>తెలుగు</option><option>हिंदी</option><option>اردو</option></select>')}</div>
+    ${commonLinks()}
+  </div>`);
+}
+
+/* =========================================================
+   ATTENDANT
+   ========================================================= */
+const VITALS = [{t:'9:58 AM', bp:'138/86', pulse:82, spo2:97, rbs:'—'}];
+function patientNotes(b){
+  if (b.demo) return DEMO_NOTES;
+  const n = [];
+  if (b.notes) n.push({tone:'amber', label:'Family notes', text:b.notes});
+  if (b.needs.includes('wheelchair')) n.push({tone:'slate', label:'Mobility', text:'Wheelchair user — use ramp entrances and lifts only.'});
+  if (+b.patient.age>=60) n.push({tone:'slate', label:'Elderly care', text:'Senior patient — check hydration, seat while waiting in queues.'});
+  if (b.needs.includes('radiology')) n.push({tone:'amber', label:'Scan safety', text:'Confirm no metal implants / pacemaker before MRI.'});
+  n.push({tone:'slate', label:'Communication', text:`Prefers ${b.patient.lang}. Update family on WhatsApp after each step.`});
+  return n;
+}
+const noDuty = () => screen(`<div class="px-6 py-20 text-center"><i data-lucide="coffee" class="mx-auto !w-12 !h-12 text-slate-300"></i><p class="mt-3 font-extrabold text-lg">No hospital duty right now</p><p class="text-slate-500">The current booking is Pickup &amp; Drop only.</p></div>`);
+function renderDuty(){
+  const {b, done, times} = S.trip, ms = tripMs(), H = hosp(b.hospital);
+  if (b.pkg==='ride') return noDuty();
+  const mine = ms.map((m,i)=>({m,i})).filter(x=>x.m.owner==='attendant');
+  const myDone = mine.filter(x=>x.i<done).length, cur = ms[done], complete = done>=ms.length;
+  const hIdx = ms.findIndex(m=>m.key==='handover'), arrived = done >= hIdx;
+  screen(`
+  <div class="bg-brand-700 text-white px-4 pt-4 pb-5">
+    <p class="text-xs font-bold text-brand-100 uppercase tracking-wider">Active hospital duty</p>
+    <h1 class="text-xl font-extrabold mt-1">${H.name}, ${H.branch}</h1>
+    <p class="text-sm text-brand-100">${H.gate}</p>
+    <div class="mt-3 rounded-2xl bg-white/10 p-3 flex items-center gap-3">
+      ${complete?'<i data-lucide="circle-check"></i><div><p class="font-bold">Duty completed</p><p class="text-xs text-brand-100">Payout ₹780 credited</p></div>'
+      : !arrived?`<span class="w-2.5 h-2.5 rounded-full bg-warm-500 pulse-amber"></span><div><p class="font-bold">Patient en route</p><p class="text-xs text-brand-100">With ${DRIVER.first} · ${DRIVER.plate}</p></div>`
+      : `<i data-lucide="clipboard-check"></i><div class="flex-1"><p class="font-bold">${myDone}/${mine.length} tasks signed</p><div class="h-1.5 rounded-full bg-white/20 mt-1.5"><div class="h-full rounded-full bg-white" style="width:${Math.round(myDone/mine.length*100)}%"></div></div></div>`}
+    </div>
+  </div>
+  <div class="px-4 py-4 space-y-3 pb-6">
+    <button onclick="go(null,'patient')" class="w-full text-left panel flex items-center gap-3">
+      <span class="w-12 h-12 rounded-xl bg-warm-50 text-warm-700 grid place-items-center font-extrabold">${b.patient.name.split(' ').map(s=>s[0]).slice(0,2).join('')}</span>
+      <span class="flex-1 min-w-0"><b class="block truncate">${b.patient.name}</b><span class="text-sm text-slate-500">${b.patient.age} yrs · ${b.patient.lang} · ${b.dept}</span></span>
+      <span class="badge-red shrink-0"><i data-lucide="triangle-alert" class="ico-sm"></i>Notes</span></button>
+    <h2 class="h2 pt-2">In-hospital checklist</h2>
+    <p class="text-sm text-slate-500 -mt-2">Toggle to sign off. Family sees each step instantly.</p>
+    ${mine.map(({m,i})=>{ const isDone=i<done, isCur=i===done; return `
+      <div class="rounded-2xl border ${isCur?'border-warm-500 bg-warm-50 ring-4 ring-warm-100':isDone?'border-brand-100 bg-white':'border-slate-200 bg-white'} p-3.5 flex items-center gap-3">
+        <span class="w-11 h-11 rounded-xl grid place-items-center shrink-0 ${isDone?'bg-brand-700 text-white':isCur?'bg-warm-600 text-white':'bg-slate-100 text-slate-400'}"><i data-lucide="${isDone?'check':m.icon}"></i></span>
+        <div class="flex-1 min-w-0">
+          <p class="font-bold leading-snug ${!isDone&&!isCur?'text-slate-400':''}">${m.title}</p>
+          <p class="text-xs ${!isDone&&!isCur?'text-slate-400':'text-slate-600'}">${m.detail}</p>
+          ${isDone?`<p class="text-xs font-bold text-brand-700 mt-1">✓ Signed · R. Reddy · ${fmtTime(times[i])}</p>`:''}
+          ${isCur?`<p class="text-xs font-bold text-warm-700 mt-1">${m.otp?'Needs OTP':'Ready to sign off'}</p>`:''}
+        </div>
+        <button class="switch" role="switch" aria-label="Sign off ${m.title}" aria-checked="${isDone}" ${isCur?'':'disabled'} onclick="attSign()"></button>
+      </div>`; }).join('')}
+    ${!complete && cur && cur.owner!=='attendant'?`<p class="text-sm text-slate-500 text-center pt-1">Waiting on: <b>${cur.title}</b></p>`:''}
+  </div>`);
+}
+function attSign(){
+  const m = tripMs()[S.trip.done]; if (!m || m.owner!=='attendant') return;
+  const go2 = ()=>{ advanceTrip('attendant'); toast(m.title + ' — signed'); };
+  if (m.otp) openOtp(m.key==='handover'?'Receive patient':'Hand back to driver', m.key==='handover'?`Enter the OTP shown on ${DRIVER.first}'s app.`:`Ask ${DRIVER.first} for the return OTP.`, go2);
+  else go2();
+}
+function renderAttPatient(){
+  const b = S.trip.b; if (b.pkg==='ride') return noDuty();
+  const tones = {red:'bg-rose-50 border-rose-200 text-rose-800', amber:'bg-warm-50 border-warm-200 text-warm-700', slate:'bg-white border-slate-200 text-slate-700'};
+  screen(sectionTitle(b.patient.name, `${b.patient.age}${b.patient.gender?' '+b.patient.gender:''} yrs · ${b.patient.lang} · ${b.id}`) + `<div class="px-4 space-y-4 pb-6">
+    <div class="flex flex-wrap gap-2">${b.needs.map(id=>{const n=NEEDS.find(x=>x.id===id); return `<span class="badge-slate"><i data-lucide="${n.icon}" class="ico-sm"></i>${n.name}</span>`;}).join('')}</div>
+    <div><h2 class="h2 mb-2">Medical notes</h2><ul class="space-y-2">${patientNotes(b).map(n=>`<li class="rounded-2xl border px-3.5 py-3 text-sm ${tones[n.tone]}"><b>${n.label}:</b> ${n.text}</li>`).join('')}</ul>
+      <p class="text-xs text-slate-500 mt-2 flex items-center gap-1"><i data-lucide="lock" class="ico-sm"></i>Shared with consent · visible only during duty</p></div>
+    <div class="panel"><h2 class="h2 mb-3">Observed vitals</h2>
+      <div class="grid grid-cols-2 gap-2"><input id="vBp" class="inp" placeholder="BP 130/80"><input id="vPulse" class="inp" inputmode="numeric" placeholder="Pulse"><input id="vSpo2" class="inp" inputmode="numeric" placeholder="SpO₂ %"><input id="vRbs" class="inp" inputmode="numeric" placeholder="RBS"></div>
+      <button class="btn-ghost w-full mt-2" onclick="logVitals()"><i data-lucide="plus"></i>Log vitals</button>
+      <ul class="mt-3 space-y-1.5 text-sm">${VITALS.map(v=>`<li class="rounded-xl bg-slate-50 px-3 py-2"><span class="text-slate-500 text-xs">${v.t}</span><br><span class="font-semibold">BP ${v.bp} · P ${v.pulse} · SpO₂ ${v.spo2}% · RBS ${v.rbs}</span></li>`).join('')}</ul></div>
+    <div class="panel"><h2 class="h2 mb-2">Update family</h2>
+      <div class="flex gap-2 overflow-x-auto no-scrollbar pb-2 -mx-1 px-1">${['3 patients ahead of us','Samples given, he is comfortable','Scan done, reports by 4 PM','Medicines collected'].map(t=>`<button class="chip !py-1.5 !min-h-[38px] text-xs whitespace-nowrap" onclick="document.getElementById('famMsg').value='${t}'">${t}</button>`).join('')}</div>
+      <textarea id="famMsg" rows="2" class="inp" placeholder="Type in English or తెలుగు…"></textarea>
+      <button class="btn-primary w-full mt-2" onclick="sendFamily()"><i data-lucide="send"></i>Send on WhatsApp</button></div>
+  </div>`);
+}
+function logVitals(){
+  const g = id => $('#'+id).value || '—', v = {t:nowStr(), bp:g('vBp'), pulse:g('vPulse'), spo2:g('vSpo2'), rbs:g('vRbs')};
+  if ([v.bp,v.pulse,v.spo2,v.rbs].every(x=>x==='—')){ toast('Enter at least one reading','warn'); return; }
+  VITALS.unshift(v);
+  if (+v.spo2 && +v.spo2 < 94) toast('SpO₂ below 94% — inform the duty nurse now','warn'); else toast('Vitals logged & shared with family');
+  logEvent(`Vitals logged for <b>${S.trip.b.id}</b> by Rahul`, 'activity', 'amber');
+}
+function sendFamily(){ const v=$('#famMsg').value.trim(); if(!v){toast('Type or pick a message','warn');return;} logEvent(`Family update · <b>${S.trip.b.id}</b>: “${v}”`, 'message-circle', 'amber'); toast('Sent to family on WhatsApp'); }
+function renderAttMe(){
+  screen(sectionTitle('Account') + `<div class="px-4 space-y-4 pb-6">
+    <div class="panel">
+      <div class="flex items-center gap-4"><div class="w-16 h-16 rounded-2xl bg-brand-700 text-white grid place-items-center text-xl font-extrabold">RR</div>
+        <div><p class="font-extrabold text-lg">Rahul Reddy</p><p class="text-sm text-slate-600">Medical Intern (MBBS)</p><p class="text-xs text-slate-500">Gandhi Medical College · TSMC/INT/2025/04512</p></div></div>
+      <div class="flex flex-wrap gap-2 mt-3"><span class="badge-ok"><i data-lucide="shield-check" class="ico-sm"></i>KYC verified</span><span class="badge-ok">BLS certified</span><span class="badge-slate">Telugu · Hindi · English</span></div>
+      <div class="grid grid-cols-3 gap-2 mt-4 text-center">${[['Duties','86'],['Rating','4.95'],['This week','₹6,840']].map(([l,v])=>`<div class="rounded-2xl bg-slate-50 p-3"><p class="text-xs text-slate-500">${l}</p><p class="font-extrabold">${v}</p></div>`).join('')}</div>
+    </div>
+    <div class="panel !py-1">${settingsRow('power','On duty','Shift 8:00 AM – 2:00 PM','<button class="switch" role="switch" aria-checked="true" onclick="this.setAttribute(\'aria-checked\', this.getAttribute(\'aria-checked\')!==\'true\');toast(\'Duty status updated\',\'info\')"></button>')}</div>
+    <div class="rounded-3xl border border-warm-200 bg-warm-50 p-4 text-sm text-warm-700"><p class="font-bold flex items-center gap-2"><i data-lucide="shield-alert"></i>Scope of duty</p><p class="mt-1">Escort, coordinate &amp; observe only. No prescribing, medication or clinical decisions. Escalate to hospital staff, then Ops <b>040-4718 2200</b>.</p></div>
+    ${commonLinks()}
+  </div>`);
+}
+
+/* =========================================================
+   DRIVER
+   ========================================================= */
+function renderDriverTrip(){
+  const {b, done, times} = S.trip, ms = tripMs(), H = hosp(b.hospital), A = area(b.area);
+  if (b.pkg==='companion') return screen(`<div class="px-6 py-20 text-center"><i data-lucide="radar" class="mx-auto !w-12 !h-12 text-slate-300"></i><p class="mt-3 font-extrabold text-lg">Looking for trips near Gachibowli</p><p class="text-slate-500">The active booking doesn't need a vehicle.</p></div>`);
+  const cur = ms[done], complete = done>=ms.length, mine = cur && cur.owner==='driver';
+  let action;
+  if (complete) action = `<div class="rounded-2xl bg-brand-50 border border-brand-100 p-5 text-center"><p class="text-xl font-extrabold text-brand-800">Trip completed ✓</p><p class="text-brand-700">Earnings ₹${Math.round((b.total||1890)*0.38)} added</p></div>`;
+  else if (mine) action = `<button class="btn-primary w-full !text-lg !min-h-[76px] !rounded-3xl shadow-lg" onclick="driverAct()"><i data-lucide="${cur.icon}"></i>${cur.action}</button>`;
+  else if (cur.key==='handover') action = `<div class="rounded-3xl bg-warm-50 border-2 border-warm-500 p-5 text-center"><p class="font-extrabold text-warm-700">Show this OTP to ${ATTENDANT.first}</p><p class="plate text-5xl font-extrabold text-slate-900 mt-2 tracking-[.3em]">${DEMO_OTP}</p><p class="text-sm text-slate-600 mt-2">${ATTENDANT.name} is at ${H.gate}</p></div>`;
+  else if (cur.owner==='attendant') action = `<div class="rounded-3xl bg-white border border-slate-200 p-5 flex items-start gap-3"><i data-lucide="circle-parking" class="text-brand-700 !w-8 !h-8"></i><div><p class="font-extrabold">Wait at ${H.parking}</p><p class="text-sm text-slate-600">Patient is inside with ${ATTENDANT.first}: <b>${cur.title}</b>. We'll ping you 10 min before handback.</p></div></div>`;
+  else action = `<div class="rounded-3xl bg-slate-50 p-5 text-slate-600">Waiting for dispatch…</div>`;
+  const steps = ms.map((m,i)=>({m,i})).filter(x=>x.m.owner==='driver' || ['handover','handback'].includes(x.m.key));
+  screen(`<div class="px-4 pt-4 space-y-4 pb-6">
+    <div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full ${complete?'bg-slate-400':'bg-warm-600 pulse-amber'}"></span><h1 class="font-extrabold text-lg">${complete?'Last trip':'Current trip'}</h1></div><span class="badge-slate">${b.id}</span></div>
+    ${action}
+    <div class="panel">
+      <p class="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1.5"><i data-lucide="map-pin" class="ico-sm text-brand-700"></i>Pickup · ${A.name} ${b.pin}</p>
+      <p class="font-bold mt-1">${b.address}</p>
+      <p class="text-sm text-slate-500 mt-1">${b.patient.name}, ${b.patient.age} · ${b.patient.lang}</p>
+      <div class="grid grid-cols-2 gap-2 mt-3"><button class="btn-ghost" onclick="toast('Opening navigation…','info')"><i data-lucide="navigation"></i>Navigate</button><button class="btn-ghost" onclick="toast('Masked call connecting…','info')"><i data-lucide="phone"></i>Call</button></div>
+    </div>
+    <div class="rounded-3xl border-2 border-warm-500 bg-warm-50 p-4">
+      <p class="text-xs font-bold text-warm-700 uppercase tracking-wider flex items-center gap-1.5"><i data-lucide="hospital" class="ico-sm"></i>Hospital drop gate</p>
+      <p class="font-extrabold text-lg mt-1">${hName(H)}</p><p class="font-bold text-warm-700">${H.gate}</p>
+      <p class="text-sm text-slate-600 mt-1">Parking: ${H.parking} · ${km(A,H).toFixed(1)} km</p>
+    </div>
+    <div class="flex flex-wrap gap-2">
+      ${b.needs.includes('wheelchair')||b.vehicle==='wav'?'<span class="badge-warn"><i data-lucide="accessibility" class="ico-sm"></i>Deploy ramp</span>':''}
+      ${+b.patient.age>=60?'<span class="badge-warn"><i data-lucide="heart-handshake" class="ico-sm"></i>Senior — assist boarding</span>':''}
+      ${b.pkg!=='ride'?`<span class="badge-ok"><i data-lucide="stethoscope" class="ico-sm"></i>Handover to ${ATTENDANT.name}</span>`:'<span class="badge-slate">3 hrs free waiting</span>'}
+    </div>
+    <div class="panel"><h2 class="h2 mb-2">Handover status</h2>
+      ${steps.map(({m,i})=>`<div class="flex items-center gap-3 py-2"><span class="w-8 h-8 rounded-full grid place-items-center shrink-0 ${i<done?'bg-brand-700 text-white':i===done?'bg-warm-600 text-white':'bg-slate-100 text-slate-400'}"><i data-lucide="${i<done?'check':m.icon}" class="ico-sm"></i></span><span class="flex-1 text-sm font-semibold ${i>done?'text-slate-400':''}">${m.title}</span>${i<done?`<span class="text-xs text-slate-500">${fmtTime(times[i])}</span>`:''}</div>`).join('')}
+    </div>
+    <button class="btn-amber w-full" onclick="toast('SOS sent — Ops desk & nearest patrol alerted','warn'); logEvent('<b>SOS drill</b> raised by Srinivas (TS 09 UB 4521)','siren','red')"><i data-lucide="siren"></i>SOS / Breakdown</button>
+  </div>`);
+}
+function driverAct(){
+  const m = tripMs()[S.trip.done]; if (!m || m.owner!=='driver') return;
+  const fin = ()=>{ advanceTrip('driver'); toast(m.title); };
+  if (m.otp) openOtp('Verify pickup OTP', `Ask ${S.trip.b.patient.name.split(' ')[0]} or family for the OTP in their app.`, fin); else fin();
+}
+function renderDriverSchedule(){
+  screen(sectionTitle('Schedule','Today · Monday') + `<div class="px-4 space-y-4 pb-6">
+    <div class="grid grid-cols-2 gap-3">${[['Trips','3'],['Earnings','₹2,140'],['Distance','64 km'],['On-time','98%']].map(([l,v])=>`<div class="panel !p-4"><p class="text-xs text-slate-500">${l}</p><p class="text-2xl font-extrabold">${v}</p></div>`).join('')}</div>
+    <h2 class="h2">Upcoming</h2>
+    ${[['1:45 PM','Kondapur → KIMS Kondapur','Mrs. Sarala Devi, 74 · Physio review','Ride','badge-slate'],['4:30 PM','HITEC City → AIG Gachibowli','Mr. Abdul Rasheed, 61 · Endoscopy (sedation)','Concierge','badge-warn'],['6:15 PM','AIG Gachibowli → HITEC City','Return leg · same patient','Concierge','badge-warn']]
+      .map(([t,r,p,k,c])=>`<div class="panel"><div class="flex items-center justify-between"><p class="font-extrabold">${t}</p><span class="${c}">${k}</span></div><p class="font-bold mt-1">${r}</p><p class="text-sm text-slate-500">${p}</p></div>`).join('')}
+  </div>`);
+}
+function renderDriverMe(){
+  screen(sectionTitle('Account') + `<div class="px-4 space-y-4 pb-6">
+    <div class="panel text-center">
+      <div class="w-16 h-16 rounded-2xl bg-slate-800 text-white grid place-items-center text-xl font-extrabold mx-auto">SG</div>
+      <p class="font-extrabold text-lg mt-2">Srinivas Goud</p><p class="text-sm text-slate-500">★ 4.92 · 1,284 trips · since 2023</p>
+      <div class="mt-4 rounded-2xl border-2 border-slate-900 bg-white flex items-stretch overflow-hidden w-fit mx-auto"><div class="bg-blue-700 text-white text-[10px] font-bold px-1.5 flex flex-col justify-center items-center leading-tight">🇮🇳<span>IND</span></div><div class="plate text-2xl font-extrabold px-4 py-2">TS 09 UB 4521</div></div>
+      <p class="text-sm text-slate-600 mt-2">Maruti Ertiga · CNG · ramp + swivel seat</p>
+      <div class="flex flex-wrap gap-2 justify-center mt-3"><span class="badge-ok"><i data-lucide="shield-check" class="ico-sm"></i>Cyberabad Police verified</span><span class="badge-ok">Wheelchair-accessible</span><span class="badge-slate">First-aid trained</span></div>
+    </div>
+    <div class="panel !py-1">${settingsRow('power','Online','Zone: Gachibowli / HITEC City','<button class="switch" role="switch" aria-checked="true" onclick="this.setAttribute(\'aria-checked\', this.getAttribute(\'aria-checked\')!==\'true\');toast(\'Status updated\',\'info\')"></button>')}</div>
+    <div class="panel"><h2 class="h2 mb-2">Documents</h2>
+      ${[['Driving licence','Valid till Aug 2031','ok'],['Commercial insurance','Renews 14 Mar 2027','ok'],['Police clearance','Verified Jan 2026','ok'],['PUC certificate','Expires in 12 days','warn']].map(([d,s,t])=>`<div class="flex items-center justify-between py-2.5"><div><p class="font-bold text-sm">${d}</p><p class="text-xs text-slate-500">${s}</p></div><span class="${t==='ok'?'badge-ok':'badge-warn'}">${t==='ok'?'Valid':'Renew'}</span></div>`).join('')}</div>
+    ${commonLinks()}
+  </div>`);
+}
+
+render(true);
+</script>
+</body>
+</html>
