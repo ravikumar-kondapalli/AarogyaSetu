@@ -64,7 +64,7 @@ const ROLES = {
   driver:    {label:'Driver',    icon:'car',             sub:'Srinivas Goud · TS 09 UB 4521'},
 };
 const NAV = {
-  patient:  [['book','Book','calendar-plus'],['track','Track','radar'],['visits','Visits','history'],['me','Account','user-round']],
+  patient:  [['book','Book','calendar-plus'],['track','Track','radar'],['stay','Travel','plane'],['visits','Visits','history'],['me','Account','user-round']],
   attendant:[['duty','Duty','clipboard-check'],['patient','Patient','notebook-pen'],['me','Account','user-round']],
   driver:   [['trip','Trip','navigation'],['schedule','Schedule','calendar-clock'],['me','Account','user-round']],
 };
@@ -111,7 +111,7 @@ function render(scrollTop=false){
   renderChrome();
   if (PMAP && !(ROLE==='patient' && TAB==='book' && BK.step===1)) destroyPickMap();
   const views = {
-    'patient/book':renderBook, 'patient/track':renderTrack, 'patient/visits':renderVisits, 'patient/me':renderPatientMe,
+    'patient/book':renderBook, 'patient/track':renderTrack, 'patient/stay':renderStay, 'patient/visits':renderVisits, 'patient/me':renderPatientMe,
     'attendant/duty':renderDuty, 'attendant/patient':renderAttPatient, 'attendant/me':renderAttMe,
     'driver/trip':renderDriverTrip, 'driver/schedule':renderDriverSchedule, 'driver/me':renderDriverMe,
   };
@@ -123,7 +123,7 @@ function render(scrollTop=false){
 onState(() => {
   // Booking screen & focused inputs keep their state; only the tab bar refreshes.
   const ae = document.activeElement;
-  if ((ROLE==='patient' && TAB==='book') || (ae && $('#screen').contains(ae) && /INPUT|TEXTAREA|SELECT/.test(ae.tagName))){ renderChrome(); icons(); return; }
+  if ((ROLE==='patient' && (TAB==='book' || (TAB==='stay' && HXVIEW==='plan'))) || (ae && $('#screen').contains(ae) && /INPUT|TEXTAREA|SELECT/.test(ae.tagName))){ renderChrome(); icons(); return; }
   render();
 });
 const screen = html => { $('#screen').innerHTML = `<div class="fade-in">${html}</div>`; };
@@ -319,6 +319,7 @@ function renderPickup(){
           ${SAVED.map(([ic,l,a])=>`<button class="chip !py-2 shrink-0" onclick="flyToArea('${a}')"><i data-lucide="${ic}" class="ico-sm text-brand-700"></i><span class="text-left leading-tight">${l}<span class="block text-[11px] text-slate-500 font-medium">${area(a).name}</span></span></button>`).join('')}
           ${AREAS.filter(a=>!SAVED.some(x=>x[2]===a.id)).map(a=>`<button class="chip !py-2 shrink-0" onclick="flyToArea('${a.id}')">${a.name}</button>`).join('')}
         </div>
+        <button onclick="HXVIEW='home';go(null,'stay')" class="mx-4 mt-3 w-[calc(100%-2rem)] flex items-center gap-3 rounded-xl bg-warm-50 border border-warm-200 px-3 py-2 text-left min-h-[48px]"><i data-lucide="plane-landing" class="text-warm-700 shrink-0"></i><span class="flex-1 text-sm leading-tight"><b class="text-warm-700">Coming from another state?</b><span class="block text-xs text-slate-600">Airport pickup, stay near hospital — Hospitality</span></span><i data-lucide="chevron-right" class="ico-sm text-warm-700"></i></button>
         <div class="px-4 mt-3"><button id="bkNext" class="btn-primary w-full" onclick="nextStep()" disabled>Confirm pickup<i data-lucide="arrow-right"></i></button>
         <p class="text-[11px] text-slate-500 text-center mt-2">Planned visits only · Emergency? Call <a href="tel:108" class="font-bold text-warm-700">108</a></p></div>
       </div>
@@ -603,6 +604,247 @@ function renderTrack(){
   </div>`);
 }
 
+/* =========================================================
+   PATIENT — Hospitality (patients from other states)
+   ========================================================= */
+const esc = v => String(v??'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+const HX_STEP_NAMES = ['Traveller','Arrival','Stay','Services','Confirm'];
+const HX_DEFAULT = () => ({ step:1, from:'state', origin:'', city:'', patient:{name:'',age:'',phone:'',lang:'Hindi'}, family:1, point:'rgia', arrive:isoDay(7), time:'10:00 AM', ref:'',
+  hospital:null, dept:'', nights:7, visits:3, stay:'hotel', address:'', addons:new Set(['companion','shuttle','depart']), pay:'upi', ack:false });
+let HX = HX_DEFAULT(), HXVIEW = 'home', HXSEL = null;
+
+function hxValid(){
+  const digits = HX.patient.phone.replace(/\D/g,'');
+  switch (HX.step){
+    case 1: return HX.patient.name.trim().length>1 && +HX.patient.age>0 && +HX.patient.age<120 && /^[6-9]\d{9}$/.test(digits);
+    case 2: return !!HX.point && !!HX.arrive && !!HX.hospital && !!HX.dept;
+    case 3: return !!HX.stay && (HX.stay!=='own' || HX.address.trim().length>5);
+    case 4: return true;
+    case 5: return HX.ack;
+  }
+}
+const hxSync = () => { const b = $('#hxNext'); if (b) b.disabled = !hxValid(); };
+const hxDraft = () => ({...HX, addons:[...HX.addons].filter(id => HX_ADDONS.some(a=>a.id===id)), id:'ASH-HX-new', done:0});
+const hxRe = () => { renderStay(); icons(); };
+/* One-tap demo data: fills every step of the planner with a complete, valid sample */
+const HX_DEMOS = [
+  {patient:{name:'Prakash Chandra Mohanty', age:'64', phone:'9437012345', lang:'Odia'}, family:2, point:'rgia', time:'8:30 AM', ref:'6E 2347',
+   hospital:'aig-gb', dept:'Hepatology', nights:10, visits:5, stay:'hotel', address:'', addons:['interp','sim','companion','shuttle','meals','depart']},
+  {patient:{name:'Sushma Deshpande', age:'59', phone:'9822045678', lang:'Marathi'}, family:1, point:'sc', time:'6:00 AM', ref:'12723',
+   hospital:'kims-sec', dept:'Neurology', nights:7, visits:4, stay:'guest', address:'', addons:['companion','shuttle','meals','support','depart']},
+  {patient:{name:'Dipankar Bora', age:'46', phone:'9864098765', lang:'Assamese'}, family:2, point:'rgia', time:'2:30 PM', ref:'AI 2741',
+   hospital:'apollo-jh', dept:'Oncology', nights:21, visits:9, stay:'apt', address:'', addons:['interp','sim','companion','shuttle','meals','support','depart']},
+  {patient:{name:'Lakshmi Narasamma', age:'71', phone:'9440312345', lang:'Telugu'}, family:1, point:'mgbs', time:'5:30 AM', ref:'APSRTC Garuda',
+   hospital:'yashoda-sec', dept:'Orthopaedics', nights:5, visits:3, stay:'own', address:"Son's flat, 4-7-112, Tarnaka, Secunderabad", addons:['companion','shuttle','depart']},
+];
+let HX_DEMO_I = 0;
+function hxFillDemo(){
+  const D = HX_DEMOS[HX_DEMO_I++ % HX_DEMOS.length], step = HX.step;
+  HX = Object.assign(HX_DEFAULT(), JSON.parse(JSON.stringify(D)), {step, arrive:isoDay(3+HX_DEMO_I), addons:new Set(D.addons), pay:'upi', ack:true});
+  toast(`Demo filled · ${D.patient.name} — tap Continue through the steps`,'info');
+  hxRe();
+}
+function hxToggle(id){ HX.addons.has(id) ? HX.addons.delete(id) : HX.addons.add(id); hxRe(); }
+function hxCount(field, delta, min, max){ HX[field] = Math.max(min, Math.min(max, HX[field]+delta)); hxRe(); }
+const stepper = (field, label, min, max, sub='') => `<div class="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-2">
+    <div class="min-w-0"><p class="font-bold text-sm">${label}</p>${sub?`<p class="text-xs text-slate-500">${sub}</p>`:''}</div>
+    <div class="flex items-center gap-1 shrink-0">
+      <button class="w-11 h-11 rounded-full bg-slate-100 grid place-items-center disabled:opacity-40" ${HX[field]<=min?'disabled':''} onclick="hxCount('${field}',-1,${min},${max})" aria-label="Less"><i data-lucide="minus" class="ico-sm"></i></button>
+      <span class="w-8 text-center text-lg font-extrabold tabular-nums">${HX[field]}</span>
+      <button class="w-11 h-11 rounded-full bg-brand-50 text-brand-700 grid place-items-center disabled:opacity-40" ${HX[field]>=max?'disabled':''} onclick="hxCount('${field}',1,${min},${max})" aria-label="More"><i data-lucide="plus" class="ico-sm"></i></button>
+    </div></div>`;
+const unitTxt = a => a.id==='depart' ? 'same as pickup' : a.unit==='visit' ? `₹${a.price}/visit` : a.unit==='day' ? `₹${a.price}/day` : `₹${a.price}`;
+
+function renderStay(){
+  if (HXVIEW==='plan') return renderHxPlan();
+  if (HXVIEW==='detail' && (S.hx||[]).some(h=>h.id===HXSEL)) return renderHxDetail();
+  const list = S.hx || [];
+  screen(sectionTitle('Hospitality','For patients coming from other states') + `<div class="px-4 space-y-4 pb-6">
+    <div class="rounded-3xl bg-brand-700 text-white p-5 relative overflow-hidden">
+      <i data-lucide="plane" class="absolute -right-3 -top-2 !w-28 !h-28 text-white/10"></i>
+      <p class="text-xs font-bold uppercase tracking-wider text-brand-100">Coming to Hyderabad from another state?</p>
+      <h2 class="text-xl font-extrabold mt-1 leading-snug">We take care of everything outside the hospital too.</h2>
+      <div class="grid grid-cols-2 gap-2 mt-4 text-sm">
+        ${[['plane-landing','Airport & station pickup'],['hotel','Stay near the hospital'],['hand-heart','Family support desk'],['languages','Interpreters'],['utensils','Diet meals'],['car','Daily hospital transfers']].map(([ic,t])=>`<div class="flex items-center gap-2 rounded-xl bg-white/10 px-2.5 py-2"><i data-lucide="${ic}" class="ico-sm shrink-0"></i><span class="font-semibold leading-tight">${t}</span></div>`).join('')}
+      </div>
+      <button class="mt-4 w-full rounded-2xl bg-white text-brand-800 font-extrabold min-h-[52px] inline-flex items-center justify-center gap-2" onclick="HX=HX_DEFAULT();HXVIEW='plan';render(true)"><i data-lucide="calendar-plus"></i>Plan a hospitality trip</button>
+      <button class="mt-2 w-full rounded-2xl border border-white/40 text-white font-bold min-h-[48px] inline-flex items-center justify-center gap-2 hover:bg-white/10" onclick="HX=HX_DEFAULT();HXVIEW='plan';hxFillDemo();render(true)"><i data-lucide="wand-sparkles"></i>Try with full demo data</button>
+    </div>
+    ${list.length?`<div class="flex items-center justify-between pt-1"><h2 class="h2">Your trips</h2><button class="text-xs font-bold text-slate-600 inline-flex items-center gap-1.5 min-h-[40px]" onclick="toggleHxAuto()">${hxLiveNote()}</button></div>`:''}
+    ${list.map(h=>{ const st = hxSteps(h), done = hxComplete(h), nx = st[Math.min(h.done, st.length-1)], H = hosp(h.hospital), d = hxDay(h); return `
+      <button class="w-full text-left panel" onclick="HXSEL='${h.id}';HXVIEW='detail';render(true)">
+        <div class="flex items-start gap-3">
+          <span class="w-12 h-12 rounded-xl bg-brand-50 text-brand-700 grid place-items-center shrink-0"><i data-lucide="map"></i></span>
+          <span class="flex-1 min-w-0">
+            <span class="flex items-center justify-between gap-2"><b class="truncate">${esc(h.patient.name)}</b><span class="${done?'badge-ok':'badge-slate'} shrink-0">${done?'Done':'Other state'}</span></span>
+            <span class="block text-sm text-slate-600 truncate">${hxFromTxt(h)?esc(hxFromTxt(h))+' → ':''}${hName(H)} · ${h.dept}</span>
+            <span class="block text-xs text-slate-500">${hxPoint(h.point).short} · ${d(0)} → ${d(h.nights)} · ${hxStay(h.stay).short}</span>
+          </span></div>
+        <div class="h-1.5 rounded-full bg-slate-100 mt-3"><div class="h-full rounded-full bg-brand-600" style="width:${Math.round(h.done/st.length*100)}%"></div></div>
+        <p class="text-xs font-bold mt-2 ${done?'text-brand-700':'text-warm-700'}">${done?'Trip completed':'Next: '+nx.title}</p>
+      </button>`; }).join('')}
+    <p class="text-xs text-slate-500 text-center px-4">Planned treatment only — not an emergency service. In emergencies call 108.</p>
+  </div>`);
+}
+
+function renderHxDetail(){
+  const h = S.hx.find(x=>x.id===HXSEL), st = hxSteps(h), H = hosp(h.hospital), P = hxPoint(h.point), St = hxStay(h.stay), q = hxQuote(h), d = hxDay(h);
+  const done = hxComplete(h), pct = Math.round(h.done/st.length*100), last = st[h.done-1], on = new Set(h.addons);
+  screen(`
+  <div class="bg-brand-700 text-white px-4 pt-3 pb-5">
+    <div class="flex items-center justify-between gap-2">
+      <button class="w-11 h-11 -ml-2 rounded-full grid place-items-center hover:bg-white/10" onclick="HXVIEW='home';render(true)" aria-label="Back"><i data-lucide="chevron-left"></i></button>
+      <span class="text-xs font-semibold bg-white/15 rounded-full px-2.5 py-1">${h.id}</span>
+    </div>
+    <p class="text-xs font-bold uppercase tracking-wider text-brand-100 mt-1">Out-of-state patient${hxFromTxt(h)?' · '+esc(hxFromTxt(h)):''}</p>
+    <h1 class="text-[1.4rem] font-extrabold mt-1 leading-tight">${done?'Trip complete — safe travels 🙏':(last?last.title:'Plan confirmed')}</h1>
+    <p class="text-brand-100 text-sm mt-1">${done?'All bills settled and papers saved in the family vault.':(last?last.detail:'')}</p>
+    <div class="mt-4"><div class="flex justify-between text-xs font-semibold mb-1.5"><span class="truncate pr-2">${done?'All steps done':'Next: '+st[h.done].title}</span><span>${pct}%</span></div>
+      <div class="h-2.5 rounded-full bg-white/20 overflow-hidden"><div class="h-full rounded-full bg-white transition-all duration-700" style="width:${pct}%"></div></div></div>
+    <div class="grid grid-cols-3 gap-2 mt-4 text-center text-sm">
+      <div class="rounded-xl bg-white/10 p-2"><p class="text-[11px] text-brand-100">Patient</p><p class="font-bold truncate">${esc(h.patient.name.split(' ')[0])}, ${h.patient.age}</p></div>
+      <div class="rounded-xl bg-white/10 p-2"><p class="text-[11px] text-brand-100">${h.done>st.findIndex(x=>x.key==='arrival')?'Arrived':'Arrives'}</p><p class="font-bold truncate">${d(0)}</p></div>
+      <div class="rounded-xl bg-white/10 p-2"><p class="text-[11px] text-brand-100">Stay</p><p class="font-bold truncate">${h.nights} nights</p></div>
+    </div>
+  </div>
+  <div class="px-4 -mt-3 space-y-4 pb-6">
+    <div class="panel !p-0 divide-y divide-slate-100 text-sm">
+      <div class="p-3 flex gap-3"><i data-lucide="${P.icon}" class="text-brand-700 shrink-0"></i><div class="min-w-0"><p class="font-bold">${P.name}</p><p class="text-slate-500">${d(0)}, ${h.time}${h.ref?' · '+esc(h.ref):''}</p><p class="text-slate-500">${P.meet}</p></div></div>
+      <div class="p-3 flex gap-3"><i data-lucide="${St.icon}" class="text-brand-700 shrink-0"></i><div class="min-w-0"><p class="font-bold">${St.name}</p><p class="text-slate-500">${St.id==='own'?esc(h.address):`Near ${H.name}, ${H.branch} · ${d(0)} → ${d(h.nights)}`}</p></div></div>
+      <div class="p-3 flex gap-3"><i data-lucide="hospital" class="text-warm-700 shrink-0"></i><div class="min-w-0"><p class="font-bold">${H.name}, ${H.branch}</p><p class="text-slate-500">${h.dept} · ${DOCTORS[h.dept]||'OPD'} · ${h.visits} visit${h.visits>1?'s':''} planned</p></div></div>
+      <div class="p-3 flex gap-3"><i data-lucide="users" class="text-brand-700 shrink-0"></i><div class="min-w-0"><p class="font-bold">${esc(h.patient.name)}${h.family?` + ${h.family} family`:''}</p><p class="text-slate-500">${esc(h.patient.phone)} · ${esc(h.patient.lang)}</p></div></div>
+    </div>
+    <div class="flex flex-wrap gap-2">${HX_ADDONS.filter(a=>on.has(a.id)).map(a=>`<span class="badge-slate"><i data-lucide="${a.icon}" class="ico-sm"></i>${a.name}</span>`).join('')}</div>
+    <div class="grid grid-cols-2 gap-2">
+      <button class="btn-ghost" onclick="toast('Calling 24×7 hospitality desk…','info')"><i data-lucide="headset"></i>Hospitality desk</button>
+      <button class="btn-ghost" onclick="toast('Itinerary shared on WhatsApp')"><i data-lucide="share-2"></i>Share itinerary</button>
+    </div>
+    <div class="panel">
+      <div class="flex items-center justify-between mb-4"><h2 class="h2">Itinerary</h2><span class="text-sm text-slate-500">${h.done}/${st.length}</span></div>
+      <ol>${st.map((m,i)=>{ const s = i<h.done?'done':i===h.done?'cur':'todo'; return `
+        <li class="flex gap-3 pb-4 last:pb-0 relative">
+          ${i<st.length-1?`<span class="absolute left-[1.15rem] top-10 bottom-0 w-0.5 ${i<h.done?'bg-brand-600':'bg-slate-200'}"></span>`:''}
+          <span class="relative z-10 w-10 h-10 shrink-0 rounded-full grid place-items-center ${s==='done'?'bg-brand-700 text-white':s==='cur'?'bg-warm-50 text-warm-700 border-2 border-warm-600 pulse-amber':'bg-slate-100 text-slate-400'}"><i data-lucide="${s==='done'?'check':m.icon}" class="ico-sm"></i></span>
+          <div class="flex-1 min-w-0 pt-0.5">
+            <div class="flex items-start justify-between gap-2"><p class="font-bold leading-snug ${s==='todo'?'text-slate-400':'text-slate-900'}">${m.title}</p><span class="text-xs font-bold text-slate-500 shrink-0 pt-0.5">${m.when}</span></div>
+            <p class="text-sm ${s==='todo'?'text-slate-400':'text-slate-600'}">${m.detail}</p>
+            ${s==='cur'?`<span class="badge-warn mt-1">${S.hxAuto===false?'Up next':'In progress'}</span>`:''}
+          </div></li>`; }).join('')}</ol>
+    </div>
+    <div class="panel text-sm space-y-1.5">
+      <h2 class="h2 mb-2">Estimate</h2>
+      ${q.lines.map(([l,v])=>`<div class="flex justify-between gap-3"><span class="text-slate-600">${l}</span><span class="font-semibold">${inr(v)}</span></div>`).join('')}
+      <div class="flex justify-between pt-2 mt-2 border-t border-slate-200 text-base"><span class="font-extrabold">Total</span><span class="font-extrabold text-brand-800">${inr(q.total)}</span></div>
+      <p class="text-xs text-slate-500 pt-1">Hospital treatment bills are paid to the hospital directly.</p>
+    </div>
+    <div class="rounded-3xl border border-dashed border-slate-300 p-4">
+      <p class="text-sm font-bold flex items-center gap-2 mb-3">${done?'<i data-lucide="circle-check" class="text-brand-700"></i>Trip finished':hxLiveNote()}</p>
+      <div class="grid grid-cols-2 gap-2">
+        <button class="btn-ghost" ${done?'disabled':''} onclick="toggleHxAuto()"><i data-lucide="${S.hxAuto===false?'play':'pause'}"></i>${S.hxAuto===false?'Resume':'Pause'}</button>
+        <button class="btn-ghost" onclick="restartHx('${h.id}')"><i data-lucide="rotate-ccw"></i>Restart</button>
+      </div>
+      <button class="btn-ghost w-full mt-2" ${done?'disabled':''} onclick="advanceHx('${h.id}','Hospitality desk');render()"><i data-lucide="fast-forward"></i>${done?'All steps done':'Skip to next step'}</button>
+      <p class="text-xs text-slate-500 mt-2">Ops can also advance this from the <a href="admin.html#hospitality" target="_blank" class="font-bold text-brand-700 underline">Hospitality desk</a>.</p>
+    </div>
+  </div>`);
+}
+
+function renderHxPlan(){
+  let h = '';
+  if (HX.step===1){
+    h = `<h2 class="text-xl font-extrabold">Who is travelling?</h2><p class="text-sm text-slate-500 mt-1">Patients coming to Hyderabad from another state</p>
+      <div class="mt-4 space-y-3">
+        <div><label class="lbl" for="hxName">Patient name (as on ID)</label><input id="hxName" class="inp" autocomplete="name" value="${esc(HX.patient.name)}" oninput="HX.patient.name=this.value;hxSync()"></div>
+        <div class="grid grid-cols-2 gap-3">
+          <div><label class="lbl" for="hxAge">Age</label><input id="hxAge" class="inp" inputmode="numeric" maxlength="3" value="${esc(HX.patient.age)}" oninput="this.value=this.value.replace(/\\D/g,'');HX.patient.age=this.value;hxSync()"></div>
+          <div><label class="lbl" for="hxLang">Language</label><select id="hxLang" class="inp !px-3" onchange="HX.patient.lang=this.value">${HX_LANGS.map(l=>`<option ${HX.patient.lang===l?'selected':''}>${l}</option>`).join('')}</select></div>
+        </div>
+        <div><label class="lbl" for="hxPhone">Mobile (WhatsApp)</label>
+          <div class="flex"><span class="inp !w-auto !rounded-r-none border-r-0 bg-slate-50 font-bold">+91</span><input id="hxPhone" class="inp !rounded-l-none" type="tel" inputmode="numeric" maxlength="10" placeholder="94252 12345" value="${esc(HX.patient.phone)}" oninput="this.value=this.value.replace(/\\D/g,'');HX.patient.phone=this.value;hxSync()"></div></div>
+        ${stepper('family','Family travelling with patient',0,4,'Attendants / bystanders')}
+      </div>`;
+  }
+  if (HX.step===2){
+    const H = HX.hospital && hosp(HX.hospital);
+    const slots = []; for (let m=0; m<24*60; m+=30) slots.push(fmtTime(m));
+    h = `<h2 class="text-xl font-extrabold">Arrival & treatment</h2>
+      <p class="lbl mt-4">Arriving at</p>
+      <div class="grid gap-2">${HX_ARRIVALS.map(P=>`<button class="chip !justify-start ${HX.point===P.id?'on':''}" onclick="HX.point='${P.id}';hxRe()"><i data-lucide="${P.icon}"></i><span class="flex-1 text-left">${P.name}</span><span class="text-xs font-bold text-slate-500">${inr(P.fee)}</span></button>`).join('')}</div>
+      <div class="grid grid-cols-2 gap-3 mt-4">
+        <div><label class="lbl" for="hxDate">Arrival date</label><input id="hxDate" type="date" min="${isoDay(0)}" class="inp !px-3" value="${HX.arrive}" onchange="HX.arrive=this.value;hxSync()"></div>
+        <div><label class="lbl" for="hxTime">Arrival time</label><select id="hxTime" class="inp !px-3" onchange="HX.time=this.value">${slots.map(s=>`<option ${HX.time===s?'selected':''}>${s}</option>`).join('')}</select></div>
+      </div>
+      <div class="mt-3"><label class="lbl" for="hxRef">${hxPoint(HX.point).kind} number (optional)</label><input id="hxRef" class="inp" placeholder="${hxPoint(HX.point).kind==='Flight'?'e.g. EK 528':'e.g. 12771'}" value="${esc(HX.ref)}" oninput="HX.ref=this.value"></div>
+      <p class="lbl mt-5">Hospital</p>
+      <div class="grid gap-2">${HOSPITALS.map(x=>`<button class="chip !justify-start ${HX.hospital===x.id?'on':''}" onclick="HX.hospital='${x.id}';HX.dept='';hxRe()"><i data-lucide="hospital"></i><span class="flex-1 text-left">${x.name}<span class="block text-xs text-slate-500 font-medium">${x.branch}</span></span></button>`).join('')}</div>
+      ${H?`<div class="mt-3"><label class="lbl" for="hxDept">Department · ${hName(H)}</label><select id="hxDept" class="inp" onchange="HX.dept=this.value;hxSync()"><option value="">Select department</option>${H.depts.map(d=>`<option ${HX.dept===d?'selected':''}>${d}</option>`).join('')}</select></div>`:''}
+      <div class="mt-4 space-y-2">${stepper('nights','Nights in Hyderabad',1,60,'Your best estimate — we can extend')}${stepper('visits','Hospital visits',1,30,'Consultations, tests, procedures')}</div>`;
+  }
+  if (HX.step===3){
+    const H = hosp(HX.hospital);
+    h = `<h2 class="text-xl font-extrabold">Where will you stay?</h2><p class="text-sm text-slate-500 mt-1">Verified partner stays near ${hName(H)}</p>
+      <div class="space-y-3 mt-4">${HX_STAYS.map(St=>`
+        <button class="card-opt ${HX.stay===St.id?'on':''}" onclick="HX.stay='${St.id}';hxRe()">
+          <div class="flex items-start gap-3">
+            <div class="w-11 h-11 rounded-xl bg-brand-50 text-brand-700 grid place-items-center shrink-0"><i data-lucide="${St.icon}"></i></div>
+            <div class="flex-1">
+              <div class="flex items-center justify-between gap-2"><p class="font-extrabold">${St.name}</p>${St.tag?`<span class="badge-warn shrink-0">${St.tag}</span>`:''}</div>
+              <ul class="mt-1.5 space-y-1">${St.incl.map(x=>`<li class="text-xs text-slate-600 flex items-center gap-1.5"><i data-lucide="check" class="ico-sm text-brand-700"></i>${x}</li>`).join('')}</ul>
+              ${St.night?`<p class="mt-2 text-lg font-extrabold text-brand-800">${inr(St.night)}<span class="text-xs font-semibold text-slate-500">/night · ${inr(St.night*HX.nights)} for ${HX.nights}</span></p>`:''}
+            </div></div></button>`).join('')}</div>
+      ${HX.stay==='own'?`<div class="mt-3"><label class="lbl" for="hxAddr">Your stay address in Hyderabad</label><textarea id="hxAddr" rows="2" class="inp" placeholder="Relative's home, hotel name, area" oninput="HX.address=this.value;hxSync()">${esc(HX.address)}</textarea></div>`:''}`;
+  }
+  if (HX.step===4){
+    h = `<h2 class="text-xl font-extrabold">Services you need</h2><p class="text-sm text-slate-500 mt-1">Select all that apply</p>
+      <div class="grid gap-2 mt-4">${HX_ADDONS.map(a=>`
+        <button class="chip !justify-start ${HX.addons.has(a.id)?'on':''}" onclick="hxToggle('${a.id}')">
+          <i data-lucide="${a.icon}"></i><span class="flex-1 text-left">${a.name}<span class="block text-xs text-slate-500 font-medium">${a.sub}</span></span><span class="text-xs font-bold text-slate-500 text-right">${unitTxt(a)}</span></button>`).join('')}</div>`;
+  }
+  if (HX.step===5){
+    const D = hxDraft(), q = hxQuote(D), H = hosp(HX.hospital), P = hxPoint(HX.point), St = hxStay(HX.stay), d = hxDay(D);
+    h = `<h2 class="text-xl font-extrabold">Review & confirm</h2>
+      <div class="mt-4 rounded-2xl border border-slate-200 bg-white divide-y divide-slate-100 text-sm">
+        <div class="p-3 flex gap-3"><i data-lucide="user" class="text-brand-700"></i><div><p class="font-bold">${esc(HX.patient.name)}, ${HX.patient.age}${HX.family?` + ${HX.family} family`:''}</p><p class="text-slate-500">${HX.patient.lang} · +91 ${esc(HX.patient.phone)}</p></div></div>
+        <div class="p-3 flex gap-3"><i data-lucide="${P.icon}" class="text-brand-700"></i><div><p class="font-bold">${P.name}</p><p class="text-slate-500">${d(0)}, ${HX.time}${HX.ref?' · '+esc(HX.ref):''}</p></div></div>
+        <div class="p-3 flex gap-3"><i data-lucide="${St.icon}" class="text-brand-700"></i><div><p class="font-bold">${St.name}</p><p class="text-slate-500">${d(0)} → ${d(HX.nights)} · ${HX.nights} nights</p></div></div>
+        <div class="p-3 flex gap-3"><i data-lucide="hospital" class="text-warm-700"></i><div><p class="font-bold">${H.name}, ${H.branch}</p><p class="text-slate-500">${HX.dept} · ${HX.visits} visit${HX.visits>1?'s':''}</p></div></div>
+      </div>
+      <div class="mt-4 rounded-2xl bg-white border border-slate-200 p-4 text-sm space-y-1.5">
+        ${q.lines.map(([l,v])=>`<div class="flex justify-between gap-3"><span class="text-slate-600">${l}</span><span class="font-semibold">${inr(v)}</span></div>`).join('')}
+        <div class="flex justify-between pt-2 mt-2 border-t border-slate-200 text-base"><span class="font-extrabold">Total</span><span class="font-extrabold text-brand-800">${inr(q.total)}</span></div>
+        <p class="text-xs text-slate-500">Treatment bills are paid to the hospital directly.</p>
+      </div>
+      <p class="lbl mt-4">Pay with</p>
+      <div class="grid grid-cols-2 gap-2">${[['upi','UPI','smartphone'],['card','Card','credit-card'],['corp','Corporate / TPA','briefcase-medical'],['later','On arrival','wallet']].map(([id,l,ic])=>`<button class="chip ${HX.pay===id?'on':''}" onclick="HX.pay='${id}';hxRe()"><i data-lucide="${ic}"></i>${l}</button>`).join('')}</div>
+      <label class="flex items-start gap-3 mt-4 rounded-2xl border border-warm-200 bg-warm-50 p-3 cursor-pointer"><input type="checkbox" class="mt-1 w-5 h-5 accent-teal-700" ${HX.ack?'checked':''} onchange="HX.ack=this.checked;hxSync()"><span class="text-sm text-warm-700"><b>Planned treatment, not an emergency.</b> We arrange travel, stay and escorts; the hospital provides treatment.</span></label>`;
+  }
+  screen(`<div class="min-h-full flex flex-col">
+    <div class="px-4 pt-3 flex items-center gap-2"><button class="w-11 h-11 -ml-2 rounded-full grid place-items-center hover:bg-slate-100" onclick="HXVIEW='home';render(true)" aria-label="Close planner"><i data-lucide="x"></i></button><p class="font-extrabold flex-1">Plan a hospitality trip</p><button class="inline-flex items-center gap-1.5 rounded-full bg-warm-50 border border-warm-200 text-warm-700 text-xs font-bold px-3 min-h-[40px]" onclick="hxFillDemo()"><i data-lucide="wand-sparkles" class="ico-sm"></i>Fill demo data</button></div>
+    <div class="px-4 pt-1"><div class="flex items-center gap-1.5">${HX_STEP_NAMES.map((n,i)=>`<div class="flex-1"><div class="h-1.5 rounded-full ${i+1<=HX.step?'bg-brand-700':'bg-slate-200'}"></div><p class="text-[11px] mt-1 font-bold ${i+1===HX.step?'text-brand-700':'text-slate-400'}">${n}</p></div>`).join('')}</div></div>
+    <div class="flex-1 px-4 py-4">${h}</div>
+    <div class="sticky bottom-0 bg-white/95 backdrop-blur border-t border-slate-200 p-3 flex gap-2">
+      ${HX.step>1?`<button class="btn-ghost !px-4" onclick="HX.step--;render(true)" aria-label="Back"><i data-lucide="chevron-left"></i></button>`:''}
+      <button id="hxNext" class="btn-primary flex-1" onclick="hxNextStep()">${HX.step<5?'Continue':'Confirm · '+inr(hxQuote(hxDraft()).total)}<i data-lucide="${HX.step<5?'chevron-right':'check'}"></i></button>
+    </div></div>`);
+  hxSync();
+}
+function hxNextStep(){
+  if (!hxValid()) return;
+  if (HX.step<5){ HX.step++; render(true); return; }
+  const D = hxDraft();
+  const h = { id:'ASH-HX-'+(3113+Math.floor(Math.random()*800)), from:D.from, origin:'', city:'',
+    patient:{name:D.patient.name.trim(), age:+D.patient.age, phone:'+91 '+D.patient.phone.trim(), lang:D.patient.lang}, family:D.family,
+    point:D.point, arrive:D.arrive, time:D.time, ref:D.ref.trim(), hospital:D.hospital, dept:D.dept, nights:D.nights, visits:D.visits, stay:D.stay, address:D.address.trim(),
+    addons:D.addons, pay:D.pay, done:1, booker:'Karthik Chilukuri' };
+  h.total = Math.round(hxQuote(h).total);
+  S.hx = [h, ...(S.hx||[])];
+  logEvent(`New hospitality plan <b>${h.id}</b> · ${esc(h.patient.name)} → ${hName(hosp(h.hospital))}`, 'plane-landing', 'amber', false);
+  emit();
+  HX = HX_DEFAULT(); HXSEL = h.id; HXVIEW = 'detail';
+  toast(`Hospitality plan ${h.id} confirmed · itinerary sent on WhatsApp`);
+  render(true);
+}
+
 /* PATIENT — Visits & Account */
 function renderVisits(){
   const t = S.trip, H = hosp(t.b.hospital), complete = tripComplete();
@@ -790,6 +1032,7 @@ function renderDriverSchedule(){
   screen(sectionTitle('Schedule','Today · Monday') + `<div class="px-4 space-y-4 pb-6">
     <div class="grid grid-cols-2 gap-3">${[['Trips','3'],['Earnings','₹2,140'],['Distance','64 km'],['On-time','98%']].map(([l,v])=>`<div class="panel !p-4"><p class="text-xs text-slate-500">${l}</p><p class="text-2xl font-extrabold">${v}</p></div>`).join('')}</div>
     <h2 class="h2">Upcoming</h2>
+    ${(S.hx||[]).filter(h=>!hxComplete(h) && hxSteps(h).findIndex(x=>x.key==='arrival')>=h.done).slice(0,2).map(h=>{ const P = hxPoint(h.point), St = hxStay(h.stay); return `<div class="panel !border-warm-200"><div class="flex items-center justify-between"><p class="font-extrabold">${hxDay(h)(0)} · ${h.time}</p><span class="badge-warn"><i data-lucide="${P.icon}" class="ico-sm"></i>Hospitality</span></div><p class="font-bold mt-1">${P.short} → ${St.id==='own'?'Guest address':St.short+' near '+hName(hosp(h.hospital))}</p><p class="text-sm text-slate-500">${esc(h.patient.name)}, ${h.patient.age}${h.family?' + '+h.family:''} · ${h.city?'from '+esc(h.city):h.dept}${h.ref?' · '+esc(h.ref):''}</p><p class="text-xs text-warm-700 font-bold mt-1">Name board · ${P.meet.split(' · ')[0]}</p></div>`; }).join('')}
     ${[['1:45 PM','Kondapur → KIMS Kondapur','Mrs. Sarala Devi, 74 · Physio review','Ride','badge-slate'],['4:30 PM','HITEC City → AIG Gachibowli','Mr. Abdul Rasheed, 61 · Endoscopy (sedation)','Concierge','badge-warn'],['6:15 PM','AIG Gachibowli → HITEC City','Return leg · same patient','Concierge','badge-warn']]
       .map(([t,r,p,k,c])=>`<div class="panel"><div class="flex items-center justify-between"><p class="font-extrabold">${t}</p><span class="${c}">${k}</span></div><p class="font-bold mt-1">${r}</p><p class="text-sm text-slate-500">${p}</p></div>`).join('')}
   </div>`);

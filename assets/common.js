@@ -69,6 +69,101 @@ const hosp = id => HOSPITALS.find(h=>h.id===id);
 const area = id => AREAS.find(a=>a.id===id);
 const hName = h => `${h.name.split(' ')[0]} ${h.branch}`;
 
+/* ---------------- Hospitality: patients from other states ---------------- */
+const HX_ARRIVALS = [
+  {id:'rgia', name:'RGIA Airport, Shamshabad',     short:'RGIA Airport',    icon:'plane-landing', kind:'Flight', meet:'Arrivals exit, Gate 3 · name board', fee:1499},
+  {id:'sc',   name:'Secunderabad Junction',        short:'Secunderabad Jn', icon:'train-front',   kind:'Train',  meet:'Platform 1 main exit · name board', fee:699},
+  {id:'kcg',  name:'Kacheguda Railway Station',    short:'Kacheguda',       icon:'train-front',   kind:'Train',  meet:'Main entrance · name board',        fee:699},
+  {id:'hyb',  name:'Hyderabad Deccan (Nampally)',  short:'Nampally',        icon:'train-front',   kind:'Train',  meet:'Platform 1 exit · name board',      fee:699},
+  {id:'lpi',  name:'Lingampally Station',          short:'Lingampally',     icon:'train-front',   kind:'Train',  meet:'Station forecourt · name board',    fee:599},
+  {id:'mgbs', name:'MGBS Bus Station',             short:'MGBS',            icon:'bus',           kind:'Bus',    meet:'Main gate · name board',            fee:599},
+];
+const HX_STAYS = [
+  {id:'guest', name:'Partner guest house',        short:'Guest house',    icon:'house',      night:1800, incl:['Within 1 km of the hospital','Ground-floor patient rooms','Wi-Fi · hot water · 24×7 caretaker']},
+  {id:'hotel', name:'Business hotel (3★)',        short:'3★ hotel',       icon:'hotel',      night:3900, incl:['Within 2 km of the hospital','Breakfast · lift & wheelchair access','24×7 front desk'], tag:'Popular'},
+  {id:'apt',   name:'Serviced apartment (2 BHK)', short:'Serviced apt.',  icon:'building-2', night:5200, incl:['Within 2 km of the hospital','Kitchen for home-style food','Room for 3–4 family members']},
+  {id:'own',   name:"I'll arrange my own stay",  short:'Own stay',       icon:'key-round',  night:0,    incl:['We still handle pickups & hospital visits from your address']},
+];
+const HX_ADDONS = [
+  {id:'interp',    name:'Medical interpreter',            short:'Interpreter', sub:'Bengali · Odia · Assamese · Marathi · Tamil · Kannada', icon:'languages', price:1200, unit:'visit'},
+  {id:'sim',       name:'Local SIM & currency exchange',  short:'SIM & forex', sub:'Ready for you at arrival',                icon:'smartphone',   price:299,  unit:'once'},
+  {id:'companion', name:'Care Companion on hospital visits', short:'Care Companion', sub:'Trained medical attendant inside the hospital', icon:'stethoscope', price:999, unit:'visit'},
+  {id:'shuttle',   name:'Stay ↔ hospital transfers',      short:'Transfers', sub:'Verified driver · wheelchair van on request', icon:'car',       price:399,  unit:'visit'},
+  {id:'meals',     name:'Diet meal plan',                 short:'Diet meals', sub:'Halal · veg · diabetic · as advised by doctor', icon:'utensils', price:650,  unit:'day'},
+  {id:'support',   name:'Family support desk',            short:'Support desk', sub:'Groceries, laundry, pharmacy runs, errands', icon:'hand-heart', price:499,  unit:'day'},
+  {id:'depart',    name:'Departure drop',                 short:'Departure drop', sub:'Back to your airport / station',         icon:'plane-takeoff', price:0,   unit:'once'},
+];
+const HX_STATES    = ['Andhra Pradesh','Karnataka','Maharashtra','Chhattisgarh','Odisha','Madhya Pradesh','Tamil Nadu','West Bengal','Bihar','Jharkhand','Assam','Uttar Pradesh','Other state'];
+const HX_LANGS     = ['Hindi','English','Telugu','Bengali','Odia','Assamese','Marathi','Kannada','Tamil','Malayalam','Gujarati','Punjabi','Urdu'];
+const hxPoint = id => HX_ARRIVALS.find(x=>x.id===id);
+const hxStay  = id => HX_STAYS.find(x=>x.id===id);
+const isoDay  = n => { const t = new Date(); t.setDate(t.getDate()+n); return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,'0')}-${String(t.getDate()).padStart(2,'0')}`; };
+function hxDay(h){   // d(n) → "19 Nov" for arrival + n days
+  return n => { if (!h.arrive) return '—'; const x = new Date(h.arrive+'T00:00'); x.setDate(x.getDate()+n); return x.toLocaleDateString('en-IN',{day:'numeric',month:'short'}); };
+}
+function hxQuote(h){
+  const P = hxPoint(h.point), St = hxStay(h.stay), on = new Set(h.addons), lines = [];
+  lines.push([`${P.kind} pickup · ${P.short} (meet & greet)`, P.fee]);
+  if (St.night) lines.push([`${St.short} · ${h.nights} night${h.nights>1?'s':''} @ ${inr(St.night)}`, St.night*h.nights]);
+  HX_ADDONS.forEach(a => {
+    if (!on.has(a.id)) return;
+    if (a.id==='depart') return lines.push([`Departure drop · ${P.short}`, P.fee]);
+    const n = a.unit==='visit' ? h.visits : a.unit==='day' ? h.nights : 1;
+    lines.push([n>1 ? `${a.name} × ${n} ${a.unit}s` : a.name, a.price*n]);
+  });
+  lines.push(['Hospitality coordination fee', 499]);
+  return {lines, total: lines.reduce((s,l)=>s+l[1],0)};
+}
+function hxSteps(h){
+  const H = hosp(h.hospital), P = hxPoint(h.point), St = hxStay(h.stay), on = new Set(h.addons), d = hxDay(h);
+  const fam = h.family ? ` + ${h.family} family` : '';
+  const s = [], add = (key, icon, title, detail, when) => s.push({key, icon, title, detail, when});
+  add('confirmed', 'badge-check', 'Hospitality plan confirmed', `${h.id} · ${h.nights} nights · patient${fam}`, 'Booked');
+  add('prereview', 'file-search', `Reports shared with ${hName(H)}`, `${h.dept} team reviews earlier reports before arrival`, d(-5));
+  add('arrival', P.icon, `Meet & greet at ${P.short}`, `${P.meet}${h.ref?' · '+h.ref:''}${on.has('sim')?' · SIM & currency ready':''}`, `${d(0)} · ${h.time}`);
+  add('checkin', St.id==='own'?'map-pin':'hotel', St.id==='own'?'Dropped at your stay':`Checked in · ${St.short}`, St.id==='own'?(h.address||'Your address'):`Near ${hName(H)} · ${St.incl[1]}`, d(0));
+  add('visit', 'stethoscope', `First hospital visit · ${h.dept}`, `${DOCTORS[h.dept]||'OPD doctor'}${on.has('companion')?' · Care Companion with patient':''}${on.has('interp')?' · interpreter present':''}`, d(1));
+  add('treatment', 'calendar-check', `Treatment & follow-ups · ${h.visits} visit${h.visits>1?'s':''}`, `${on.has('shuttle')?'Daily transfers from your stay':'Hospital visits'}${on.has('meals')?' · diet meals delivered':''}`, `${d(1)} – ${d(Math.max(1,h.nights-1))}`);
+  add('checkout', 'luggage', 'Check-out & bills settled', 'Hospital & stay bills reconciled · discharge papers in the family vault', d(h.nights));
+  add('departure', on.has('depart')?'plane-takeoff':'house', on.has('depart')?`Departure drop · ${P.short}`:'Journey home', on.has('depart')?'Verified driver to your terminal / platform':"Safe travels — we'll check in once you reach home", d(h.nights));
+  return s;
+}
+const hxFromTxt = h => [h.city, h.origin].filter(Boolean).join(', ');
+const hxComplete = h => h.done >= hxSteps(h).length;
+function advanceHx(id, who='Ops'){
+  const h = (S.hx||[]).find(x=>x.id===id); if (!h || hxComplete(h)) return null;
+  const st = hxSteps(h)[h.done]; h.done++;
+  logEvent(`<b>${h.id}</b> · ${st.title} <span class="text-slate-400">(${who})</span>`, st.icon, 'amber', false);
+  emit(); return st;
+}
+/* Auto-advance every active hospitality itinerary one step every 5 s.
+   hxTick in the shared store stops several open tabs (app + admin) from double-advancing. */
+const HX_TICK_MS = 5000;
+setInterval(()=>{
+  if (!S.hx || S.hxAuto===false) return;
+  if (Date.now() - (S.hxTick||0) < HX_TICK_MS - 400) return;
+  const live = S.hx.filter(h=>!hxComplete(h)); if (!live.length) return;
+  S.hxTick = Date.now();
+  live.forEach(h=>{ const st = hxSteps(h)[h.done]; h.done++; logEvent(`<b>${h.id}</b> · ${st.title} <span class="text-slate-400">(auto)</span>`, st.icon, 'amber', false); });
+  emit();
+}, HX_TICK_MS);
+function toggleHxAuto(){ S.hxAuto = S.hxAuto===false; S.hxTick = Date.now(); emit(); toast(S.hxAuto?'Hospitality live updates resumed':'Hospitality live updates paused','info'); }
+function restartHx(id){ const h = (S.hx||[]).find(x=>x.id===id); if (!h) return; h.done = 1; S.hxTick = Date.now(); S.hxAuto = true; emit(); toast('Itinerary restarted','info'); }
+const hxLiveNote = () => S.hxAuto===false
+  ? '<i data-lucide="pause" class="ico-sm text-warm-700"></i>Live updates paused'
+  : '<span class="w-2.5 h-2.5 rounded-full bg-brand-600 pulse-teal"></span>Live · auto-updates every 5 seconds';
+
+function defaultHx(){
+  return [
+    {id:'ASH-HX-3107', from:'state', origin:'West Bengal', city:'Kolkata', patient:{name:'Bijoy Kumar Das', age:58, phone:'+91 98310 •••47', lang:'Bengali'}, family:2,
+     point:'rgia', arrive:isoDay(-2), time:'7:40 AM', ref:'Flight 6E 6523', hospital:'yashoda-som', dept:'Cardiology', nights:14, visits:6, stay:'apt',
+     addons:['interp','sim','companion','shuttle','meals','support','depart'], done:4, booker:'Daughter · Moumita Das', demo:true},
+    {id:'ASH-HX-3112', from:'state', origin:'Chhattisgarh', city:'Raipur', patient:{name:'Sunita Sahu', age:47, phone:'+91 94252 •••63', lang:'Hindi'}, family:1,
+     point:'sc', arrive:isoDay(2), time:'6:35 AM', ref:'Train from Raipur', hospital:'apollo-jh', dept:'Oncology', nights:7, visits:4, stay:'guest',
+     addons:['companion','shuttle','meals','depart'], done:2, booker:'Husband · Ramesh Sahu', demo:true},
+  ];
+}
+
 /* ---------------- Trip engine: milestones per booking ---------------- */
 const _msCache = {};
 function buildMilestones(b){
@@ -122,6 +217,7 @@ function defaultState(){
     trip: newTrip(DEMO_BOOKING, 4),
     stats:{active:47, trainees:312, drivers:138},
     myApps:[],
+    hx: defaultHx(),
     queue:[
       {id:'TR-1041', type:'trainee', name:'Sravani Kondapalli', sub:'B.Sc Nursing (Final yr) · Govt. College of Nursing, Hyderabad', idno:'TSNMC/STU/2023/7781', docs:['College ID card','Bonafide certificate','Aadhaar (masked)','BLS certificate'], flags:[], ts:m(8), langs:'Telugu, English', status:'pending'},
       {id:'DR-2207', type:'driver',  name:'Mohammed Imran', sub:'TS 07 FK 8834 · Toyota Innova Crysta', idno:'DL TS0720190045521', docs:['Driving licence','RC','Commercial insurance','Police clearance certificate'], flags:[], ts:m(14), langs:'Urdu, Hindi, Telugu', status:'pending'},
@@ -131,6 +227,7 @@ function defaultState(){
       {id:'DR-2206', type:'driver',  name:'Anil Kumar Goud', sub:'TG 09 AB 1077 · Maruti Dzire', idno:'DL TS0920210012345', docs:['Driving licence','RC','Commercial insurance','Police clearance certificate','PUC & fitness'], flags:[], ts:m(118), langs:'Telugu', status:'pending'},
     ],
     feed:[
+      {ts:m(2),  t:'', text:'<b>ASH-HX-3112</b> · Hospitality plan confirmed (Raipur → Apollo Jubilee Hills)', icon:'plane-landing', tone:'amber'},
       {ts:m(3),  t:'', text:'Partner hospital <b>KIMS Kondapur</b> came online · gate API connected', icon:'hospital', tone:'teal'},
       {ts:m(9),  t:'', text:'<b>Mohammed Imran</b> uploaded police clearance (Hyderabad City Police)', icon:'file-check-2', tone:'amber'},
       {ts:m(20), t:'', text:'<b>ASH-HYD-24817</b> · Booking confirmed (Karthik C., HITEC City)', icon:'badge-check', tone:'teal'},
@@ -139,7 +236,7 @@ function defaultState(){
 }
 let S = load();
 function load(){
-  try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.v===1 && s.trip) return s; } catch(e){}
+  try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.v===1 && s.trip){ if (!Array.isArray(s.hx) || s.hx.some(h=>h.from==='intl')) s.hx = defaultHx(); return s; } } catch(e){}
   const d = defaultState(); try { localStorage.setItem(KEY, JSON.stringify(d)); } catch(e){}
   return d;
 }
